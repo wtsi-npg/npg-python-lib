@@ -20,6 +20,8 @@ import logging
 
 import structlog
 
+"""This module provides utility functions for logging."""
+
 
 def configure_structlog(
     config_file=None, debug=False, verbose=False, colour=False, json=False

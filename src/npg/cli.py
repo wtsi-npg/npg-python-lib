@@ -22,6 +22,8 @@ from datetime import datetime, timedelta, timezone
 
 import dateutil.parser
 
+"""This module provides utility functions for command line interfaces."""
+
 
 def add_date_range_arguments(parser: argparse, begin_delta=14):
     """Add --begin-date and --end-date arguments to the argument parser.

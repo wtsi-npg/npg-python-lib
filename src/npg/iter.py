@@ -18,6 +18,8 @@
 import itertools
 from typing import Iterable
 
+"""This module provides utility functions for iterables."""
+
 
 def with_previous(iterable: Iterable) -> Iterable:
     """Return an iterable that yields pairs of items from the argument iterable, each
