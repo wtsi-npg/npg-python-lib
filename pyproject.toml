@@ -1,0 +1,45 @@
+[project]
+name = "npg-python-lib"
+description = "A library of Python functions and classes common to NPG applications."
+license = { file = "LICENSE", content-type = "text/plain" }
+readme = { file = "README.md", content-type = "text/markdown" }
+authors = [{ name = "Keith James", email = "kdj@sanger.ac.uk" },
+           { name = "Michael Kubiak", email = "mk35@sanger.ac.uk" }]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Programming Language :: Python"
+]
+keywords = ["npg"]
+requires-python = ">=3.10"
+
+dynamic = ["version"]
+
+dependencies = [
+    "structlog",
+]
+
+[project.optional-dependencies]
+test = [
+    "black",
+    "pytest",
+    "pytest-it"
+]
+
+[project.urls]
+homepage = "https://github.com/wtsi-npg/npg-python-lib"
+repository = "https://github.com/wtsi-npg/npg-python-lib.git"
+
+[build-system]
+requires = ["setuptools>=41", "wheel", "setuptools-git-versioning>=2.0,<3"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Note: we are relying on setuptools' automatic package discovery, so no further
+# configuration is required. This is possible because npg-irods-python uses a standard
+# src layout. See the following for more information:
+#
+# https://setuptools.pypa.io/en/latest/userguide/package_discovery.html#src-layout
+
+[tool.setuptools-git-versioning]
+enabled = true
