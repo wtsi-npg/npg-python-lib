@@ -3,8 +3,7 @@ name = "npg-python-lib"
 description = "A library of Python functions and classes common to NPG applications."
 license = { file = "LICENSE", content-type = "text/plain" }
 readme = { file = "README.md", content-type = "text/markdown" }
-authors = [{ name = "Keith James", email = "kdj@sanger.ac.uk" },
-           { name = "Michael Kubiak", email = "mk35@sanger.ac.uk" }]
+authors = [{ name = "Keith James", email = "kdj@sanger.ac.uk" }]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
@@ -16,15 +15,15 @@ requires-python = ">=3.10"
 dynamic = ["version"]
 
 dependencies = [
-    "python-dateutil",
-    "structlog",
+    "python-dateutil >=2.9.0,<3",
+    "structlog >=23.3.0",
 ]
 
 [project.optional-dependencies]
 test = [
-    "black",
-    "pytest",
-    "pytest-it"
+    "black >=24.3.0,<25",
+    "pytest >=8.0,<9",
+    "pytest-it >=0.1.5"
 ]
 
 [project.urls]
