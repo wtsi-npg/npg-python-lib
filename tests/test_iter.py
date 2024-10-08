@@ -22,29 +22,27 @@ from npg.iter import with_previous
 
 
 @m.describe("with_previous")
-@m.it("Returns pairs of previous and current items")
-def test_returns_pairs_of_previous_and_current_items():
-    result = list(with_previous([1, 2, 3]))
-    expected = [(None, 1), (1, 2), (2, 3), (3, None)]
-    assert result == expected
+class TestWithPrevious:
+    @m.it("Returns pairs of previous and current items")
+    def test_returns_pairs_of_previous_and_current_items(self):
+        result = list(with_previous([1, 2, 3]))
+        expected = [(None, 1), (1, 2), (2, 3), (3, None)]
+        assert result == expected
 
+    @m.it("Handles an empty iterable")
+    def test_handles_empty_iterable(self):
+        result = list(with_previous([]))
+        expected = [(None, None)]
+        assert result == expected
 
-@m.it("Handles an empty iterable")
-def test_handles_empty_iterable():
-    result = list(with_previous([]))
-    expected = [(None, None)]
-    assert result == expected
+    @m.it("Handles a single element iterable")
+    def test_handles_single_element_iterable(self):
+        result = list(with_previous([1]))
+        expected = [(None, 1), (1, None)]
+        assert result == expected
 
-
-@m.it("Handles a single element iterable")
-def test_handles_single_element_iterable():
-    result = list(with_previous([1]))
-    expected = [(None, 1), (1, None)]
-    assert result == expected
-
-
-@m.it("Handles an iterable with None")
-def test_handles_iterable_with_none():
-    result = list(with_previous([None, 1, None]))
-    expected = [(None, None), (None, 1), (1, None), (None, None)]
-    assert result == expected
+    @m.it("Handles an iterable with None")
+    def test_handles_iterable_with_none(self):
+        result = list(with_previous([None, 1, None]))
+        expected = [(None, None), (None, 1), (1, None), (None, None)]
+        assert result == expected
