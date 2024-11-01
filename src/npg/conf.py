@@ -88,6 +88,14 @@ class IniData:
 
     The class provides INFO level logging of its actions to enable loading of
     configurations to be traced.
+
+    If your dataclass includes sensitive information, you should take care to ensure
+    that the fields are not logged. This can be done by declaring the field with
+    metadata:
+
+        @dataclass
+        class ServerConfig:
+            admin-token: str = field(repr=False)
     """
 
     def __init__(self, cls: D, use_env: bool = False, env_prefix: str = ""):
