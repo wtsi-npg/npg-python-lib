@@ -182,6 +182,8 @@ class IniData:
 
                 kwargs[field.name] = os.environ.get(env_var)
 
-        log.debug("Reading complete", dataclass=self.dataclass, kwargs=kwargs)
+        instance = self.dataclass(**kwargs)
 
-        return self.dataclass(**kwargs)
+        log.debug("Reading complete", instance=instance)
+
+        return instance

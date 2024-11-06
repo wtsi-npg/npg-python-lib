@@ -15,12 +15,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from typing import Optional
 from unittest.mock import patch
 
 import pytest
 from pytest import mark as m
+from structlog.testing import capture_logs
 
 from npg.conf import IniData, ParseError
 
@@ -29,6 +31,7 @@ from npg.conf import IniData, ParseError
 class ExampleConfig:
     """An example dataclass for testing."""
 
+    secret: str = field(repr=False)
     key1: str
     key2: Optional[str] = None
 
@@ -69,11 +72,13 @@ class TestIniData:
         section = "test"
         val1 = "value1"
         val2 = "value2"
-        ini_file.write_text(f"[{section}]\nkey1={val1}\nkey2={val2}\n")
+        ini_file.write_text(
+            f"[{section}]\nsecret=SECRET_VALUE\nkey1={val1}\nkey2={val2}\n"
+        )
 
         parser = IniData(ExampleConfig)
         assert parser.from_file(ini_file, section) == ExampleConfig(
-            key1=val1, key2=val2
+            key1=val1, key2=val2, secret="SECRET_VALUE"
         )
 
     @m.context("When a field required by the dataclass is absent")
@@ -94,10 +99,12 @@ class TestIniData:
         ini_file = tmp_path / "config.ini"
         section = "test"
         val1 = "value1"
-        ini_file.write_text(f"[{section}]\nkey1={val1}\n")
+        ini_file.write_text(f"[{section}]\nsecret=SECRET_VALUE\nkey1={val1}\n")
 
         parser = IniData(ExampleConfig)
-        assert parser.from_file(ini_file, section) == ExampleConfig(key1=val1)
+        assert parser.from_file(ini_file, section) == ExampleConfig(
+            key1=val1, secret="SECRET_VALUE"
+        )
 
     @m.context("When environment variables are not to be used")
     @m.it("Does not fall back to environment variables when a field is absent")
@@ -105,13 +112,13 @@ class TestIniData:
         ini_file = tmp_path / "config.ini"
         section = "test"
         val1 = "value1"
-        ini_file.write_text(f"[{section}]\nkey1={val1}\n")
+        ini_file.write_text(f"[{section}]\nsecret=SECRET_VALUE\nkey1={val1}\n")
 
         env_val2 = "environment_value2"
         with patch.dict("os.environ", {"KEY2": env_val2}):
             parser = IniData(ExampleConfig, use_env=False)
             assert parser.from_file(ini_file, section) == ExampleConfig(
-                key1=val1, key2=None
+                secret="SECRET_VALUE", key1=val1, key2=None
             )
 
     @m.context("When environment variables are to be used")
@@ -120,13 +127,13 @@ class TestIniData:
         ini_file = tmp_path / "config.ini"
         section = "test"
         val1 = "value1"
-        ini_file.write_text(f"[{section}]\nkey1={val1}\n")
+        ini_file.write_text(f"[{section}]\nsecret=SECRET_VALUE\nkey1={val1}\n")
 
         env_val2 = "environment_value2"
         with patch.dict("os.environ", {"KEY2": env_val2}):
             parser = IniData(ExampleConfig, use_env=True)
             assert parser.from_file(ini_file, section) == ExampleConfig(
-                key1=val1, key2=env_val2
+                key1=val1, key2=env_val2, secret="SECRET_VALUE"
             )
 
     @m.context("When environment variables are to be used with a prefix")
@@ -135,12 +142,45 @@ class TestIniData:
         ini_file = tmp_path / "config.ini"
         section = "test"
         val1 = "value1"
-        ini_file.write_text(f"[{section}]\nkey1={val1}\n")
+        ini_file.write_text(f"[{section}]\nsecret=SECRET_VALUE\nkey1={val1}\n")
 
         env_val2 = "environment_value2"
 
         with patch.dict("os.environ", {"EXAMPLE_KEY2": env_val2}):
             parser = IniData(ExampleConfig, use_env=True, env_prefix="EXAMPLE_")
             assert parser.from_file(ini_file, section) == ExampleConfig(
-                key1=val1, key2=env_val2
+                key1=val1, key2=env_val2, secret="SECRET_VALUE"
             )
+
+    @m.context("When the configuration class includes a secret field")
+    @m.it("Does not include the secret field in the representation")
+    def test_secret_repr(self):
+        assert (
+            repr(ExampleConfig(secret="SECRET_VALUE", key1="value1"))
+            == "ExampleConfig(key1='value1', key2=None)"
+        )
+
+    @m.context("When the configuration class includes a secret field")
+    @m.it("Does not include the secret field in the debug log")
+    def test_secret_debug(self, tmp_path, caplog):
+        ini_file = tmp_path / "config.ini"
+        section = "test"
+        val1 = "value1"
+        secret = "SECRET_VALUE"
+        ini_file.write_text(f"[{section}]\nsecret={secret}\nkey1={val1}\n")
+
+        with caplog.at_level(logging.DEBUG):
+            with capture_logs() as cap_logs:
+                IniData(ExampleConfig).from_file(ini_file, section)
+
+                found_log = False
+                found_secret = False
+
+                for log in cap_logs:
+                    if "event" in log and log["event"] == "Reading complete":
+                        found_log = True
+                        if str(log).find(secret) >= 0:
+                            found_secret = True
+
+                assert found_log
+                assert not found_secret
