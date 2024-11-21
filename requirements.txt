@@ -1,4 +1,4 @@
 python-dateutil == 2.9.0.post0
 setuptools-git-versioning==2.0.0
-setuptools==75.5.0
+setuptools==75.6.0
 structlog==24.4.0
