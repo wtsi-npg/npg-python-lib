@@ -44,7 +44,7 @@ class IniData:
     a specified dataclass. Using a dataclass results in configuration that is easier
     to understand and more maintainable than using a bare dictionary because all its
     fields are explicitly defined. This means that they are readable, navigable and
-    autocomplete-able in an IDE, can have default values, and can have docstrings.
+    autocomplete-able in an IDE and can have default values and docstrings.
 
     E.g. given an INI file 'config.ini':
 
