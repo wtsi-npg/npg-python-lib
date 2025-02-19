@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright © 2023 Genome Research Ltd. All rights reserved.
+# Copyright © 2023, 2025 Genome Research Ltd. All rights reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -111,12 +111,12 @@ def add_io_arguments(parser: ArgumentParser) -> ArgumentParser:
 def add_logging_arguments(parser: ArgumentParser) -> ArgumentParser:
     """Adds standard CLI logging arguments to a parser.
 
-    - --log-config Use a log configuration file (mutually exclusive with --debug,
-        --verbose, --colour and --json).
+    - --log-config Use a log configuration file.
     - -d/--debug   Enable DEBUG level logging to STDERR.
     - -v/--verbose Enable INFO level logging to STDERR.
+
     - --colour     Use coloured log rendering to the console.
-    - --json       Use JSON log rendering.
+    - --log-json   Use JSON log rendering.
 
     Args:
         parser: An argument parser to modify.
@@ -124,34 +124,36 @@ def add_logging_arguments(parser: ArgumentParser) -> ArgumentParser:
     Returns:
         The parser
     """
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
+    group1 = parser.add_mutually_exclusive_group()
+    group1.add_argument(
         "--log-config",
         "--log_config",
         help="A logging configuration file.",
         type=str,
     )
-    group.add_argument(
+    group1.add_argument(
         "-d",
         "--debug",
         help="Enable DEBUG level logging to STDERR.",
         action="store_true",
     )
-    group.add_argument(
+    group1.add_argument(
         "-v",
         "--verbose",
         help="Enable INFO level logging to STDERR.",
         action="store_true",
     )
 
-    parser.add_argument(
-        "--json",
-        help="Use JSON log rendering.",
-        action="store_true",
-    )
-    parser.add_argument(
+    group2 = parser.add_mutually_exclusive_group()
+    group2.add_argument(
         "--colour",
         help="Use coloured log rendering to the console.",
+        action="store_true",
+    )
+    group2.add_argument(
+        "--log-json",
+        "--log_json",
+        help="Use JSON log rendering.",
         action="store_true",
     )
 
