@@ -56,10 +56,10 @@ def configure_structlog(
     # documentation "Rendering within structlog":
     #
     # "This is the simplest approach where structlog does all the heavy
-    # lifting and passes a fully-formatted string to logging."
+    # lifting and passes a fully formatted string to logging."
 
     log_processors = [
-        # If log level is too low, abort pipeline and throw away log entry.
+        # If the log level is too low, abort pipeline and throw away log entry.
         structlog.stdlib.filter_by_level,
         # Add the name of the logger to event dict.
         structlog.stdlib.add_logger_name,
@@ -77,7 +77,7 @@ def configure_structlog(
         # with traceback into the "exception" key.
         structlog.processors.format_exc_info,
         # structlog.processors.dict_tracebacks,
-        # If some value is in bytes, decode it to a unicode str.
+        # If some value is in bytes, decode it to a Unicode str.
         structlog.processors.UnicodeDecoder(),
         # Add call site parameters.
         structlog.processors.CallsiteParameterAdder(
@@ -85,6 +85,7 @@ def configure_structlog(
                 structlog.processors.CallsiteParameter.FILENAME,
                 structlog.processors.CallsiteParameter.FUNC_NAME,
                 structlog.processors.CallsiteParameter.LINENO,
+                structlog.processors.CallsiteParameter.THREAD_NAME,
             }
         ),
     ]
