@@ -17,6 +17,7 @@
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 from unittest.mock import patch
 
@@ -28,7 +29,7 @@ from npg.conf import IniData, ParseError
 
 
 @dataclass
-class ExampleConfig:
+class ConfigWithSecret:
     """An example dataclass for testing."""
 
     secret: str = field(repr=False)
@@ -36,8 +37,27 @@ class ExampleConfig:
     key2: Optional[str] = None
 
 
+@dataclass
+class ConfigWithBuiltinTypes:
+    key1: int
+    key2: float
+    key3: bool
+
+
+@dataclass
+class ConfigWithOptionalBuiltinTypes:
+    key1: Optional[int]
+    key2: Optional[float]
+    key3: Optional[bool]
+
+
+@dataclass
+class ConfigWithPathType:
+    key1: Path
+
+
 class NonDataclass:
-    """A example non-dataclass for testing."""
+    """An example non-dataclass for testing."""
 
     pass
 
@@ -49,7 +69,7 @@ class TestIniData:
     def test_missing_ini_file(self, tmp_path):
         ini_file = tmp_path / "missing.ini"
 
-        parser = IniData(ExampleConfig)
+        parser = IniData(ConfigWithSecret)
         with pytest.raises(ParseError):
             parser.from_file(ini_file, "section")
 
@@ -76,8 +96,8 @@ class TestIniData:
             f"[{section}]\nsecret=SECRET_VALUE\nkey1={val1}\nkey2={val2}\n"
         )
 
-        parser = IniData(ExampleConfig)
-        assert parser.from_file(ini_file, section) == ExampleConfig(
+        parser = IniData(ConfigWithSecret)
+        assert parser.from_file(ini_file, section) == ConfigWithSecret(
             key1=val1, key2=val2, secret="SECRET_VALUE"
         )
 
@@ -89,7 +109,7 @@ class TestIniData:
         val2 = "value2"
         ini_file.write_text(f"[{section}]\nkey2={val2}\n")
 
-        parser = IniData(ExampleConfig)
+        parser = IniData(ConfigWithSecret)
         with pytest.raises(TypeError):
             parser.from_file(ini_file, section)
 
@@ -101,8 +121,8 @@ class TestIniData:
         val1 = "value1"
         ini_file.write_text(f"[{section}]\nsecret=SECRET_VALUE\nkey1={val1}\n")
 
-        parser = IniData(ExampleConfig)
-        assert parser.from_file(ini_file, section) == ExampleConfig(
+        parser = IniData(ConfigWithSecret)
+        assert parser.from_file(ini_file, section) == ConfigWithSecret(
             key1=val1, secret="SECRET_VALUE"
         )
 
@@ -116,8 +136,8 @@ class TestIniData:
 
         env_val2 = "environment_value2"
         with patch.dict("os.environ", {"KEY2": env_val2}):
-            parser = IniData(ExampleConfig, use_env=False)
-            assert parser.from_file(ini_file, section) == ExampleConfig(
+            parser = IniData(ConfigWithSecret, use_env=False)
+            assert parser.from_file(ini_file, section) == ConfigWithSecret(
                 secret="SECRET_VALUE", key1=val1, key2=None
             )
 
@@ -131,8 +151,8 @@ class TestIniData:
 
         env_val2 = "environment_value2"
         with patch.dict("os.environ", {"KEY2": env_val2}):
-            parser = IniData(ExampleConfig, use_env=True)
-            assert parser.from_file(ini_file, section) == ExampleConfig(
+            parser = IniData(ConfigWithSecret, use_env=True)
+            assert parser.from_file(ini_file, section) == ConfigWithSecret(
                 key1=val1, key2=env_val2, secret="SECRET_VALUE"
             )
 
@@ -147,8 +167,8 @@ class TestIniData:
         env_val2 = "environment_value2"
 
         with patch.dict("os.environ", {"EXAMPLE_KEY2": env_val2}):
-            parser = IniData(ExampleConfig, use_env=True, env_prefix="EXAMPLE_")
-            assert parser.from_file(ini_file, section) == ExampleConfig(
+            parser = IniData(ConfigWithSecret, use_env=True, env_prefix="EXAMPLE_")
+            assert parser.from_file(ini_file, section) == ConfigWithSecret(
                 key1=val1, key2=env_val2, secret="SECRET_VALUE"
             )
 
@@ -156,8 +176,8 @@ class TestIniData:
     @m.it("Does not include the secret field in the representation")
     def test_secret_repr(self):
         assert (
-            repr(ExampleConfig(secret="SECRET_VALUE", key1="value1"))
-            == "ExampleConfig(key1='value1', key2=None)"
+            repr(ConfigWithSecret(secret="SECRET_VALUE", key1="value1"))
+            == "ConfigWithSecret(key1='value1', key2=None)"
         )
 
     @m.context("When the configuration class includes a secret field")
@@ -171,7 +191,7 @@ class TestIniData:
 
         with caplog.at_level(logging.DEBUG):
             with capture_logs() as cap_logs:
-                IniData(ExampleConfig).from_file(ini_file, section)
+                IniData(ConfigWithSecret).from_file(ini_file, section)
 
                 found_log = False
                 found_secret = False
@@ -184,3 +204,71 @@ class TestIniData:
 
                 assert found_log
                 assert not found_secret
+
+    @m.context("When the configuration class includes an int, float or bool field")
+    @m.it("Converts the value to the declared type")
+    def test_typed_fields_file(self, tmp_path):
+        ini_file = tmp_path / "config.ini"
+        section = "test"
+        val1 = 1
+        val2 = 1.0
+        val3 = True
+        ini_file.write_text(f"[{section}]\nkey1={val1}\nkey2={val2}\nkey3={val3}\n")
+
+        parser = IniData(ConfigWithBuiltinTypes)
+        assert parser.from_file(ini_file, section) == ConfigWithBuiltinTypes(
+            key1=val1, key2=val2, key3=val3
+        )
+
+    @m.context(
+        "When the configuration class includes an Optional int, float or bool field"
+    )
+    @m.it("Converts the value to the declared type")
+    def test_optional_typed_fields_file(self, tmp_path):
+        ini_file = tmp_path / "config.ini"
+        section = "test"
+        val1 = ""
+        val2 = ""
+        val3 = ""
+        ini_file.write_text(f"[{section}]\nkey1={val1}\nkey2={val2}\nkey3={val3}\n")
+
+        parser = IniData(ConfigWithOptionalBuiltinTypes)
+        assert parser.from_file(ini_file, section) == ConfigWithOptionalBuiltinTypes(
+            None, None, None
+        )
+
+    @m.context("When the configuration class includes a Path field")
+    @m.it("Converts the value to a Path object")
+    def test_path_field_file(self, tmp_path):
+        ini_file = tmp_path / "config.ini"
+        section = "test"
+        val1 = "/usr/bin"
+        ini_file.write_text(f"[{section}]\nkey1={val1}\n")
+
+        parser = IniData(ConfigWithPathType)
+        assert parser.from_file(ini_file, section) == ConfigWithPathType(
+            key1=Path(val1)
+        )
+
+    @m.context(
+        "When environment variables are used to populate int, float or bool fields"
+    )
+    @m.it("Converts the value to the expected type")
+    def test_typed_fields_env(self, tmp_path):
+        ini_file = tmp_path / "config.ini"
+        section = "test"
+        val1 = ""
+        val2 = ""
+        val3 = ""
+        ini_file.write_text(f"[{section}]\nkey1={val1}\nkey2={val2}\nkey3={val3}\n")
+
+        env_val1 = "1"
+        env_val2 = "1.0"
+        env_val3 = "true"
+        with patch.dict(
+            "os.environ", {"KEY1": env_val1, "KEY2": env_val2, "KEY3": env_val3}
+        ):
+            parser = IniData(ConfigWithBuiltinTypes, use_env=True)
+            assert parser.from_file(ini_file, section) == ConfigWithBuiltinTypes(
+                1, 1.0, True
+            )
