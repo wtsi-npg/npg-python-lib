@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright © 2024 Genome Research Ltd. All rights reserved.
+# Copyright © 2024, 2025 Genome Research Ltd. All rights reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,13 +15,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import configparser
 import dataclasses
 import os
+from configparser import ConfigParser
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, Optional, TypeVar, get_type_hints
 
 from structlog import get_logger
 
@@ -84,7 +84,9 @@ class IniData:
         parser = IniData(ServerConfig, use_env=True, env_prefix="SERVER_").
         obj = from_file("config.ini", "server")
 
-    All values are treated as strings.
+    All values are treated as strings except where the dataclass declares its field
+    types as int, float, bool or Path (or Optional versions of these), in which case
+    the string is parsed into the appropriate type.
 
     The class provides INFO level logging of its actions to enable loading of
     configurations to be traced.
@@ -96,6 +98,10 @@ class IniData:
         @dataclass
         class ServerConfig:
             admin-token: str = field(repr=False)
+
+    To extend this class to support additional field types, you can override the
+    parse_ini_value and parse_environment_value methods. These handle values from the
+    INI file and environment variables, respectively.
     """
 
     def __init__(self, cls: D, use_env: bool = False, env_prefix: str = ""):
@@ -146,14 +152,17 @@ class IniData:
             dataclass=self.dataclass,
         )
 
-        parser = configparser.ConfigParser()
+        parser = ConfigParser()
         if not parser.read(p):
             raise ParseError(f"Could not read '{p}'")
 
+        hints = get_type_hints(self.dataclass)
         kwargs = {}
         for field in dataclasses.fields(self.dataclass):
+            hint = hints.get(field.name, None)
+
             if parser.has_option(section, field.name):
-                val = parser.get(section, field.name)
+                val = self.parse_ini_value(parser, section, field, hint)
 
                 if val is None and self.use_env:
                     env_var = self.env_prefix.upper() + field.name.upper()
@@ -164,8 +173,7 @@ class IniData:
                         field=field.name,
                         env_var=env_var,
                     )
-
-                    val = os.environ.get(env_var)
+                    val = self.parse_environment_value(os.environ.get(env_var), hint)
 
                 kwargs[field.name] = val
 
@@ -180,10 +188,96 @@ class IniData:
                     env_var=env_var,
                 )
 
-                kwargs[field.name] = os.environ.get(env_var)
+                kwargs[field.name] = self.parse_environment_value(
+                    os.environ.get(env_var), hint
+                )
 
         instance = self.dataclass(**kwargs)
-
         log.debug("Reading complete", instance=instance)
 
         return instance
+
+    def parse_ini_value(self, parser: ConfigParser, section: str, field, hint) -> Any:
+        """
+        Parses the value of a field from a configuration file, converting it to its
+        specified type or hint.
+
+        Args:
+            parser: Configuration parser object used to read values.
+            section: The section in the configuration file where the field resides.
+            field: The field object whose value is to be parsed and converted.
+            hint: The expected type or hint of the field's value that determines the
+                conversion.
+
+        Returns:
+            The parsed value converted to the type specified by the hint.
+        """
+        parsed_val = None
+
+        val = parser.get(section, field.name)
+        val = "" if val is None else val.strip()
+
+        if hint is str:
+            parsed_val = val
+        elif bool(val):
+            if hint is int:
+                parsed_val = parser.getint(section, field.name)
+            elif hint is float:
+                parsed_val = parser.getfloat(section, field.name)
+            elif hint is bool:
+                parsed_val = parser.getboolean(section, field.name)
+            elif hint is Path:
+                parsed_val = Path(parser.get(section, field.name))
+            elif hint is Optional[str]:
+                parsed_val = parser.get(section, field.name)
+            elif hint is Optional[int]:
+                parsed_val = parser.getint(section, field.name)
+            elif hint is Optional[float]:
+                parsed_val = parser.getfloat(section, field.name)
+            elif hint is Optional[bool]:
+                parsed_val = parser.getboolean(section, field.name)
+            elif hint is Optional[Path]:
+                parsed_val = Path(parser.get(section, field.name))
+
+        return parsed_val
+
+    def parse_environment_value(self, val: str, hint) -> Any:
+        """
+        Parses an environment variable value and converts it to the specified type.
+
+        This function takes a string value and a type hint, converting the string into
+        the desired type. It supports the basic data types `str`, `int`, `float`, `bool`,
+        and instances of `Path`. Optional types for these primitive or file path types
+        are also supported. If an unsupported type is provided in the hint, a
+        ValueError` is raised.
+
+        Args:
+            val: The string value to convert.
+            hint: The expected type or hint of the field's value that determines the
+                conversion.
+
+        Returns:
+            The parsed value, converted to the specified type.
+        """
+        if hint is str:
+            return val
+        elif hint is int:
+            return int(val)
+        elif hint is float:
+            return float(val)
+        elif hint is bool:
+            return val.lower() == "true"
+        elif hint is Path:
+            return Path(val)
+        elif hint is Optional[str]:
+            return val
+        elif hint is Optional[int]:
+            return int(val) if val else None
+        elif hint is Optional[float]:
+            return float(val) if val else None
+        elif hint is Optional[bool]:
+            return val.lower() == "true" if val else None
+        elif hint is Optional[Path]:
+            return Path(val) if val else None
+        else:
+            raise ValueError(f"Unsupported type '{hint}'")
