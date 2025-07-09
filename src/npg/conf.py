@@ -201,8 +201,7 @@ class IniData:
     def parse_ini_value(self, parser: ConfigParser, section: str, field, hint) -> Any:
         """
         Parses the value of a field from a configuration file, converting it to its
-        specified type or hint. If the value is absent or empty, it attempts to return
-        a default value based on the provided type hint.
+        specified type or hint.
 
         Args:
             parser: Configuration parser object used to read values.
@@ -212,7 +211,7 @@ class IniData:
                 conversion.
 
         Returns:
-        The parsed value converted to the type specified by the hint.
+            The parsed value converted to the type specified by the hint.
         """
         parsed_val = None
 
@@ -247,11 +246,11 @@ class IniData:
         """
         Parses an environment variable value and converts it to the specified type.
 
-        This function takes a string value and a type hint, converting the string into the
-        desired type. It supports basic data types such as `str`, `int`, `float`, `bool`,
-        and instances of `Path`. Optional types for these primitive or file path types are
-        also supported. If an unsupported type is provided in the hint, a `ValueError`
-        will be raised.
+        This function takes a string value and a type hint, converting the string into
+        the desired type. It supports the basic data types `str`, `int`, `float`, `bool`,
+        and instances of `Path`. Optional types for these primitive or file path types
+        are also supported. If an unsupported type is provided in the hint, a
+        ValueError` is raised.
 
         Args:
             val: The string value to convert.
