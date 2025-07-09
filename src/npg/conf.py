@@ -15,7 +15,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import configparser
 import dataclasses
 import os
 from configparser import ConfigParser
@@ -153,7 +152,7 @@ class IniData:
             dataclass=self.dataclass,
         )
 
-        parser = configparser.ConfigParser()
+        parser = ConfigParser()
         if not parser.read(p):
             raise ParseError(f"Could not read '{p}'")
 
