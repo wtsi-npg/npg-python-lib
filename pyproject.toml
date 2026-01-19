@@ -31,7 +31,7 @@ homepage = "https://github.com/wtsi-npg/npg-python-lib"
 repository = "https://github.com/wtsi-npg/npg-python-lib.git"
 
 [build-system]
-requires = ["setuptools>=41", "wheel", "setuptools-git-versioning>=2.0,<3"]
+requires = ["setuptools>=41", "wheel", "setuptools-git-versioning>=2.0,<4"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
