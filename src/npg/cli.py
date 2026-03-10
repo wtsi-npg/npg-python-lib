@@ -16,7 +16,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import argparse
-import sys
 from argparse import ArgumentParser
 from datetime import datetime, timedelta, timezone
 
@@ -25,7 +24,7 @@ import dateutil.parser
 """This module provides utility functions for command line interfaces."""
 
 
-def add_date_range_arguments(parser: argparse, begin_delta=14):
+def add_date_range_arguments(parser: ArgumentParser, begin_delta=14):
     """Add --begin-date and --end-date arguments to the argument parser.
 
     Args:
@@ -36,6 +35,7 @@ def add_date_range_arguments(parser: argparse, begin_delta=14):
     Returns:
         The parser.
     """
+
     parser.add_argument(
         "--begin-date",
         "--begin_date",
@@ -67,13 +67,14 @@ def add_db_config_arguments(parser: ArgumentParser) -> ArgumentParser:
     Returns:
         The parser
     """
+
     parser.add_argument(
         "--db-config",
         "--db_config",
         "--database-config",
         "--database_config",
         help="Configuration file for database connection",
-        type=argparse.FileType("r", encoding="UTF-8"),
+        type=str,
         required=True,
     )
 
@@ -81,7 +82,8 @@ def add_db_config_arguments(parser: ArgumentParser) -> ArgumentParser:
 
 
 def add_io_arguments(parser: ArgumentParser) -> ArgumentParser:
-    """Adds standard input/output arguments to a parser.
+    """Adds standard input/output arguments to a parser. A literal ``-`` should be
+    used to indicate STDIN/STDOUT.
 
     - --input
     - --output
@@ -92,17 +94,18 @@ def add_io_arguments(parser: ArgumentParser) -> ArgumentParser:
     Returns:
         The parser
     """
+
     parser.add_argument(
         "--input",
         help="Input file",
-        type=argparse.FileType("r", encoding="UTF-8"),
-        default=sys.stdin,
+        type=str,
+        default="-",
     )
     parser.add_argument(
         "--output",
         help="Output file",
-        type=argparse.FileType("w", encoding="UTF-8"),
-        default=sys.stdout,
+        type=str,
+        default="-",
     )
 
     return parser
@@ -112,11 +115,11 @@ def add_logging_arguments(parser: ArgumentParser) -> ArgumentParser:
     """Adds standard CLI logging arguments to a parser.
 
     - --log-config Use a log configuration file.
-    - -d/--debug   Enable DEBUG level logging to STDERR.
+    - -d/--debug Enable DEBUG level logging to STDERR.
     - -v/--verbose Enable INFO level logging to STDERR.
 
-    - --colour     Use coloured log rendering to the console.
-    - --log-json   Use JSON log rendering.
+    - --colour Use coloured log rendering to the console.
+    - --log-json Use JSON log rendering.
 
     Args:
         parser: An argument parser to modify.
@@ -124,6 +127,7 @@ def add_logging_arguments(parser: ArgumentParser) -> ArgumentParser:
     Returns:
         The parser
     """
+
     group1 = parser.add_mutually_exclusive_group()
     group1.add_argument(
         "--log-config",
@@ -162,6 +166,7 @@ def add_logging_arguments(parser: ArgumentParser) -> ArgumentParser:
 
 def parse_iso_date(date: str) -> datetime:
     """Custom argparse type for ISO8601 dates."""
+
     try:
         return dateutil.parser.isoparse(date)
     except ValueError:
