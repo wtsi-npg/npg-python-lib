@@ -10,7 +10,7 @@ classifiers = [
     "Programming Language :: Python"
 ]
 keywords = ["npg"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 dynamic = ["version"]
 
