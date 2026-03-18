@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright © 2023, 2025 Genome Research Ltd. All rights reserved.
+# Copyright © 2023, 2025, 2026 Genome Research Ltd. All rights reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,8 +16,12 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import argparse
+import sys
 from argparse import ArgumentParser
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, BinaryIO, Generator, TextIO
 
 import dateutil.parser
 
@@ -191,3 +195,66 @@ def integer_in_range(minimum: int, maximum: int):
         return val
 
     return check_range
+
+
+@contextmanager
+def open_input(
+    path: str | None, mode: str = "rt"
+) -> Generator[BinaryIO | TextIO | Any, Any, None]:
+    """Open a file for reading or use STDIN if the supplied path is '-' or None.
+
+    This is meant to be used as a context manager together with ``add_io_arguments``.
+
+    E.g.
+        parser = add_io_arguments(parser)
+        args = parser.parse_args()
+
+        with open_input(args.input) as input:
+            for line in input:
+                print(line)
+    """
+
+    bin_mode = "b" in mode
+    if path in (None, "-"):
+        if bin_mode:
+            yield sys.stdin.buffer
+        else:
+            yield sys.stdin
+        return
+
+    stream = Path(path).open(mode=mode)
+    try:
+        yield stream
+    finally:
+        stream.close()
+
+
+@contextmanager
+def open_output(
+    path: str | None, mode: str = "wt"
+) -> Generator[BinaryIO | TextIO | Any, Any, None]:
+    """Open a file for writing or use STDOUT if the supplied path is '-' or None.
+
+    This is meant to be used as a context manager together with ``add_io_arguments``.
+
+    E.g.
+        parser = add_io_arguments(parser)
+        args = parser.parse_args()
+
+        with open_output(args.output) as output:
+            print("Hello, world!", file=output)
+
+    """
+    bin_mode = "b" in mode
+    if path in (None, "-"):
+        if bin_mode:
+            yield sys.stdout.buffer
+        else:
+            yield sys.stdout
+        return
+
+    stream = Path(path).open(mode=mode)
+    try:
+        yield stream
+    finally:
+        stream.close()
