@@ -10,19 +10,19 @@ classifiers = [
     "Programming Language :: Python"
 ]
 keywords = ["npg"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 dynamic = ["version"]
 
 dependencies = [
     "python-dateutil >=2.9.0,<3",
-    "structlog >=23.3.0",
+    "structlog >=25",
 ]
 
 [project.optional-dependencies]
 test = [
-    "black >=24.3.0,<27",
-    "pytest >=8.0,<10",
+    "black >=26,<27",
+    "pytest >=9,<10",
     "pytest-it >=0.1.5"
 ]
 
@@ -31,7 +31,7 @@ homepage = "https://github.com/wtsi-npg/npg-python-lib"
 repository = "https://github.com/wtsi-npg/npg-python-lib.git"
 
 [build-system]
-requires = ["setuptools>=41", "wheel", "setuptools-git-versioning>=2.0,<4"]
+requires = ["setuptools>=80", "wheel", "setuptools-git-versioning>=3,<4"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]

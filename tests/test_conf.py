@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright © 2024, 2025 Genome Research Ltd. All rights reserved.
+# Copyright © 2024, 2025, 2026 Genome Research Ltd. All rights reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@ import pytest
 from pytest import mark as m
 from structlog.testing import capture_logs
 
-from npg.conf import IniData, ParseError
+from npg.conf import IniData, TomlData
 
 
 @dataclass
@@ -95,15 +95,29 @@ class CustomValueIniData(IniData):
         return super().parse_environment_value(val, hint)
 
 
+class CustomValueTomlData(TomlData):
+    def parse_toml_value(self, val: Any, _field, hint) -> Any:
+        if hint is CustomValue:
+            return CustomValue(val)
+
+        return super().parse_toml_value(val, _field, hint)
+
+    def parse_environment_value(self, val: str, hint) -> Any:
+        if hint is CustomValue:
+            return CustomValue(val)
+
+        return super().parse_environment_value(val, hint)
+
+
 @m.describe("IniData")
 class TestIniData:
     @m.context("When the INI file is missing")
-    @m.it("Raises a ParseError")
+    @m.it("Raises a FileNotFoundError")
     def test_missing_ini_file(self, tmp_path):
         ini_file = tmp_path / "missing.ini"
 
         parser = IniData(ConfigWithSecret)
-        with pytest.raises(ParseError):
+        with pytest.raises(FileNotFoundError):
             parser.from_file(ini_file, "section")
 
     @m.context("When the dataclass is missing")
@@ -330,5 +344,247 @@ class TestIniData:
         with patch.dict("os.environ", {"KEY1": env_val1}):
             parser = CustomValueIniData(ConfigWithCustomValue, use_env=True)
             assert parser.from_file(ini_file, section) == ConfigWithCustomValue(
+                key1=CustomValue(env_val1), key2=val2
+            )
+
+
+@m.describe("TomlData")
+class TestTomlData:
+    @m.context("When the TOML file is missing")
+    @m.it("Raises a FileNotFoundError")
+    def test_missing_toml_file(self, tmp_path):
+        toml_file = tmp_path / "missing.toml"
+
+        parser = TomlData(ConfigWithSecret)
+        with pytest.raises(FileNotFoundError):
+            parser.from_file(toml_file, "section")
+
+    @m.context("When the dataclass is missing")
+    @m.it("Raises a ValueError")
+    def test_invalid_dataclass(self):
+        with pytest.raises(ValueError):
+            TomlData(None)
+
+    @m.context("When the dataclass is a non-dataclass")
+    @m.it("Raises a ValueError")
+    def test_non_dataclass(self):
+        with pytest.raises(ValueError):
+            TomlData(NonDataclass)
+
+    @m.context("When the TOML file is present")
+    @m.it("Populates a dataclass")
+    def test_populate_from_toml_file(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        section = "test"
+        secret = "SECRET_VALUE"
+        val1 = "value1"
+        val2 = "value2"
+        toml_file.write_text(
+            f'[{section}]\nsecret = "{secret}"\nkey1 = "{val1}"\nkey2 = "{val2}"\n'
+        )
+
+        parser = TomlData(ConfigWithSecret)
+        assert parser.from_file(toml_file, section) == ConfigWithSecret(
+            key1=val1, key2=val2, secret=secret
+        )
+
+    @m.context("When a field required by the dataclass is absent")
+    @m.it("Raises a TypeError")
+    def test_missing_required_value(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        section = "test"
+        val2 = "value2"
+        toml_file.write_text(f'[{section}]\nkey2 = "{val2}"\n')
+
+        parser = TomlData(ConfigWithSecret)
+        with pytest.raises(TypeError):
+            parser.from_file(toml_file, section)
+
+    @m.context("When an optional field is absent")
+    @m.it("Populates a dataclass")
+    def test_missing_non_required_value(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        section = "test"
+        secret = "SECRET_VALUE"
+        val1 = "value1"
+        toml_file.write_text(f'[{section}]\nsecret = "{secret}"\nkey1 = "{val1}"\n')
+
+        parser = TomlData(ConfigWithSecret)
+        assert parser.from_file(toml_file, section) == ConfigWithSecret(
+            key1=val1, secret=secret
+        )
+
+    @m.context("When environment variables are not to be used")
+    @m.it("Does not fall back to environment variables when a field is absent")
+    def test_no_env_fallback(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        section = "test"
+        val1 = "value1"
+        secret = "SECRET_VALUE"
+        toml_file.write_text(f'[{section}]\nsecret = "{secret}"\nkey1 = "{val1}"\n')
+
+        env_val2 = "environment_value2"
+        with patch.dict("os.environ", {"KEY2": env_val2}):
+            parser = TomlData(ConfigWithSecret, use_env=False)
+            assert parser.from_file(toml_file, section) == ConfigWithSecret(
+                secret=secret, key1=val1, key2=None
+            )
+
+    @m.context("When environment variables are to be used")
+    @m.it("Falls back to environment variables when a field is absent")
+    def test_env_fallback(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        section = "test"
+        val1 = "value1"
+        toml_file.write_text(f'[{section}]\nsecret = "SECRET_VALUE"\nkey1 = "{val1}"\n')
+
+        env_val2 = "environment_value2"
+        with patch.dict("os.environ", {"KEY2": env_val2}):
+            parser = TomlData(ConfigWithSecret, use_env=True)
+            assert parser.from_file(toml_file, section) == ConfigWithSecret(
+                key1=val1, key2=env_val2, secret="SECRET_VALUE"
+            )
+
+    @m.context("When environment variables are to be used with a prefix")
+    @m.it("Falls back to environment variables with a prefix when a field is absent")
+    def test_env_fallback_with_prefix(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        section = "test"
+        secret = "SECRET_VALUE"
+        val1 = "value1"
+        toml_file.write_text(f'[{section}]\nsecret = "{secret}"\nkey1 = "{val1}"\n')
+
+        env_val2 = "environment_value2"
+
+        with patch.dict("os.environ", {"EXAMPLE_KEY2": env_val2}):
+            parser = TomlData(ConfigWithSecret, use_env=True, env_prefix="EXAMPLE_")
+            assert parser.from_file(toml_file, section) == ConfigWithSecret(
+                key1=val1, key2=env_val2, secret=secret
+            )
+
+    @m.context("When the config class includes a secret field")
+    @m.it("Does not include the secret field in the representation")
+    def test_secret_repr(self):
+        assert (
+            repr(ConfigWithSecret(secret="SECRET_VALUE", key1="value1"))
+            == "ConfigWithSecret(key1='value1', key2=None)"
+        )
+
+    @m.context("When the config class includes a secret field")
+    @m.it("Does not include the secret field in the debug log")
+    def test_secret_debug(self, tmp_path, caplog):
+        toml_file = tmp_path / "config.toml"
+        section = "test"
+        secret = "SECRET_VALUE"
+        val1 = "value1"
+        toml_file.write_text(f'[{section}]\nsecret = "{secret}"\nkey1 = "{val1}"\n')
+
+        with caplog.at_level(logging.DEBUG):
+            with capture_logs() as cap_logs:
+                TomlData(ConfigWithSecret).from_file(toml_file, section)
+
+                found_log = False
+                found_secret = False
+
+                for log in cap_logs:
+                    if "event" in log and log["event"] == "Reading complete":
+                        found_log = True
+                        if str(log).find(secret) >= 0:
+                            found_secret = True
+
+                assert found_log
+                assert not found_secret
+
+    @m.context("When the config class includes an int, float or bool field")
+    @m.it("Converts the value to the declared type")
+    def test_typed_fields_file(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        section = "test"
+        val1 = 1
+        val2 = 1.0
+        val3 = True
+        toml_file.write_text(
+            f"[{section}]\nkey1 = {val1}\nkey2 = {val2}\nkey3 = {str(val3).lower()}\n"
+        )
+
+        parser = TomlData(ConfigWithBuiltinTypes)
+        assert parser.from_file(toml_file, section) == ConfigWithBuiltinTypes(
+            key1=val1, key2=val2, key3=val3
+        )
+
+    @m.context("When the config class includes an Optional int, float or bool field")
+    @m.it("Converts the value to the declared type")
+    def test_optional_typed_fields_file(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        section = "test"
+        val1 = ""
+        val2 = ""
+        val3 = ""
+        toml_file.write_text(
+            f'[{section}]\nkey1 = "{val1}"\nkey2 = "{val2}"\nkey3 = "{val3}"\n'
+        )
+
+        parser = TomlData(ConfigWithOptionalBuiltinTypes)
+        assert parser.from_file(toml_file, section) == ConfigWithOptionalBuiltinTypes(
+            None, None, None
+        )
+
+    @m.context("When the configuration class includes a Path field")
+    @m.it("Converts the value to a Path object")
+    def test_path_field_file(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        section = "test"
+        val1 = "/usr/bin"
+        toml_file.write_text(f'[{section}]\nkey1 = "{val1}"\n')
+
+        parser = TomlData(ConfigWithPathType)
+        assert parser.from_file(toml_file, section) == ConfigWithPathType(
+            key1=Path(val1)
+        )
+
+    @m.context("When environment variables populate int, float or bool fields")
+    @m.it("Converts the value to the expected type")
+    def test_typed_fields_env(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        section = "test"
+        toml_file.write_text(f"[{section}]\n")
+
+        env_val1 = "1"
+        env_val2 = "1.0"
+        env_val3 = "true"
+        with patch.dict(
+            "os.environ", {"KEY1": env_val1, "KEY2": env_val2, "KEY3": env_val3}
+        ):
+            parser = TomlData(ConfigWithBuiltinTypes, use_env=True)
+            assert parser.from_file(toml_file, section) == ConfigWithBuiltinTypes(
+                1, 1.0, True
+            )
+
+    @m.context("When the config class includes a custom value")
+    @m.it("Converts the custom value to the declared type")
+    def test_custom_value_file(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        section = "test"
+        val1 = "value1"
+        val2 = "value2"
+        toml_file.write_text(f'[{section}]\nkey1 = "{val1}"\nkey2 = "{val2}"\n')
+
+        parser = CustomValueTomlData(ConfigWithCustomValue)
+        assert parser.from_file(toml_file, section) == ConfigWithCustomValue(
+            key1=CustomValue(val1), key2=val2
+        )
+
+    @m.context("When environment variables populate custom values")
+    @m.it("Converts the custom value to the declared type")
+    def test_custom_value_env(self, tmp_path):
+        toml_file = tmp_path / "config.toml"
+        section = "test"
+        val2 = "value2"
+        toml_file.write_text(f'[{section}]\nkey2 = "{val2}"\n')
+
+        env_val1 = "valueX"
+        with patch.dict("os.environ", {"KEY1": env_val1}):
+            parser = CustomValueTomlData(ConfigWithCustomValue, use_env=True)
+            assert parser.from_file(toml_file, section) == ConfigWithCustomValue(
                 key1=CustomValue(env_val1), key2=val2
             )

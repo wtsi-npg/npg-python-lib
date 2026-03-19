@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright © 2023, 2025 Genome Research Ltd. All rights reserved.
+# Copyright © 2023, 2025, 2026 Genome Research Ltd. All rights reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,14 +18,17 @@
 import argparse
 import sys
 from argparse import ArgumentParser
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, BinaryIO, Generator, TextIO
 
 import dateutil.parser
 
 """This module provides utility functions for command line interfaces."""
 
 
-def add_date_range_arguments(parser: argparse, begin_delta=14):
+def add_date_range_arguments(parser: ArgumentParser, begin_delta=14):
     """Add --begin-date and --end-date arguments to the argument parser.
 
     Args:
@@ -36,6 +39,7 @@ def add_date_range_arguments(parser: argparse, begin_delta=14):
     Returns:
         The parser.
     """
+
     parser.add_argument(
         "--begin-date",
         "--begin_date",
@@ -67,13 +71,14 @@ def add_db_config_arguments(parser: ArgumentParser) -> ArgumentParser:
     Returns:
         The parser
     """
+
     parser.add_argument(
         "--db-config",
         "--db_config",
         "--database-config",
         "--database_config",
         help="Configuration file for database connection",
-        type=argparse.FileType("r", encoding="UTF-8"),
+        type=str,
         required=True,
     )
 
@@ -81,7 +86,8 @@ def add_db_config_arguments(parser: ArgumentParser) -> ArgumentParser:
 
 
 def add_io_arguments(parser: ArgumentParser) -> ArgumentParser:
-    """Adds standard input/output arguments to a parser.
+    """Adds standard input/output arguments to a parser. A literal ``-`` should be
+    used to indicate STDIN/STDOUT.
 
     - --input
     - --output
@@ -92,17 +98,18 @@ def add_io_arguments(parser: ArgumentParser) -> ArgumentParser:
     Returns:
         The parser
     """
+
     parser.add_argument(
         "--input",
         help="Input file",
-        type=argparse.FileType("r", encoding="UTF-8"),
-        default=sys.stdin,
+        type=str,
+        default="-",
     )
     parser.add_argument(
         "--output",
         help="Output file",
-        type=argparse.FileType("w", encoding="UTF-8"),
-        default=sys.stdout,
+        type=str,
+        default="-",
     )
 
     return parser
@@ -112,11 +119,11 @@ def add_logging_arguments(parser: ArgumentParser) -> ArgumentParser:
     """Adds standard CLI logging arguments to a parser.
 
     - --log-config Use a log configuration file.
-    - -d/--debug   Enable DEBUG level logging to STDERR.
+    - -d/--debug Enable DEBUG level logging to STDERR.
     - -v/--verbose Enable INFO level logging to STDERR.
 
-    - --colour     Use coloured log rendering to the console.
-    - --log-json   Use JSON log rendering.
+    - --colour Use coloured log rendering to the console.
+    - --log-json Use JSON log rendering.
 
     Args:
         parser: An argument parser to modify.
@@ -124,6 +131,7 @@ def add_logging_arguments(parser: ArgumentParser) -> ArgumentParser:
     Returns:
         The parser
     """
+
     group1 = parser.add_mutually_exclusive_group()
     group1.add_argument(
         "--log-config",
@@ -162,6 +170,7 @@ def add_logging_arguments(parser: ArgumentParser) -> ArgumentParser:
 
 def parse_iso_date(date: str) -> datetime:
     """Custom argparse type for ISO8601 dates."""
+
     try:
         return dateutil.parser.isoparse(date)
     except ValueError:
@@ -186,3 +195,78 @@ def integer_in_range(minimum: int, maximum: int):
         return val
 
     return check_range
+
+
+@contextmanager
+def open_input(
+    path: str | None, mode="rt", **kwargs
+) -> Generator[BinaryIO | TextIO | Any, Any, None]:
+    """Open a file for reading or use STDIN if the supplied path is '-' or None.
+
+
+    Args:
+        path: File path.
+        mode: File open mode. Default is 'rt'.
+        kwargs: Other keyword arguments passed to ``Path.open`` if STDIN is not used.
+
+    This is meant to be used as a context manager together with ``add_io_arguments``.
+
+    E.g.
+        parser = add_io_arguments(parser)
+        args = parser.parse_args()
+
+        with open_input(args.input) as input:
+            for line in input:
+                print(line)
+    """
+
+    bin_mode = "b" in mode
+    if path in (None, "-"):
+        if bin_mode:
+            yield sys.stdin.buffer
+        else:
+            yield sys.stdin
+        return
+
+    stream = Path(path).open(mode=mode, **kwargs)
+    try:
+        yield stream
+    finally:
+        stream.close()
+
+
+@contextmanager
+def open_output(
+    path: str | None, mode="wt", **kwargs
+) -> Generator[BinaryIO | TextIO | Any, Any, None]:
+    """Open a file for writing or use STDOUT if the supplied path is '-' or None.
+
+    Args:
+        path: File path.
+        mode: File open mode. Default is 'wt'.
+        kwargs: Other keyword arguments passed to ``Path.open`` if STDOUT is not used.
+
+    This is meant to be used as a context manager together with ``add_io_arguments``.
+
+    E.g.
+        parser = add_io_arguments(parser)
+        args = parser.parse_args()
+
+        with open_output(args.output) as output:
+            print("Hello, world!", file=output)
+
+    """
+
+    bin_mode = "b" in mode
+    if path in (None, "-"):
+        if bin_mode:
+            yield sys.stdout.buffer
+        else:
+            yield sys.stdout
+        return
+
+    stream = Path(path).open(mode=mode, **kwargs)
+    try:
+        yield stream
+    finally:
+        stream.close()

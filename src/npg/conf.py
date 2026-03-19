@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright © 2024, 2025 Genome Research Ltd. All rights reserved.
+# Copyright © 2024, 2025, 2026 Genome Research Ltd. All rights reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,8 +17,10 @@
 
 import dataclasses
 import os
+import tomllib
+from abc import ABC, abstractmethod
 from configparser import ConfigParser
-from dataclasses import dataclass
+from dataclasses import Field, dataclass
 from os import PathLike
 from pathlib import Path
 from typing import Any, Optional, TypeVar, get_type_hints
@@ -39,7 +41,125 @@ class ParseError(Exception):
     pass
 
 
-class IniData:
+class BaseConfigData(ABC):
+    """Base class for configuration loaders that can fall back to environment
+    variables.
+    """
+
+    def __init__(self, cls: D, use_env: bool = False, env_prefix: str = ""):
+        """Makes a new configuration instance which can create instances of the
+        dataclass 'D'.
+
+        Args:
+            cls: A dataclass to bind to this configuration.
+            use_env: If True, fall back to environment variables if a value is not found
+                in a configuration file. Defaults to False. The environment variable
+                used to supply a missing field's value is the field name in upper case
+                (prefixed with env_prefix, if provided).
+            env_prefix: A prefix to add to the name of any environment variable used as
+                a fallback. Defaults to "". The prefix is folded to upper case.
+                Dataclass field names exist in the context of their class. However,
+                environment variables exist in a global context and can benefit from a
+                more descriptive name. The prefix can be used to provide that.
+        """
+
+        if dataclass is None:
+            raise ValueError("A dataclass argument is required")
+        if not dataclasses.is_dataclass(cls):
+            raise ValueError(f"'{cls}' is not a dataclass")
+
+        self.dataclass = cls
+        self.use_env = use_env
+        self.env_prefix = env_prefix
+
+    @abstractmethod
+    def from_file(self, config_file: PathLike | str, section: str) -> D:
+        """Create a new dataclass instance from a configuration file
+
+        Args:
+            config_file: Path to the configuration file.
+            section: Section name within the configuration file.
+
+        Returns:
+            A new dataclass instance populated with configuration values.
+        ."""
+
+        ...
+
+    def env_var_name(self, field) -> str:
+        """Return the environment variable name for a given dataclass field.
+
+        Args:
+            field: The dataclass field for which to return an environment variable name.
+        """
+
+        return self.env_prefix.upper() + field.name.upper()
+
+    def parse_environment_value(self, val: str, hint) -> Any:
+        """Parses an environment variable value and converts it to the specified type.
+
+        This function takes a string value and a type hint, converting the string into
+        the desired type. It supports the basic data types `str`, `int`, `float`, `bool`,
+        and instances of `Path`. Optional types for these primitive or file path types
+        are also supported. If an unsupported type is provided in the hint, a
+        ValueError` is raised.
+
+        Args:
+            val: The string value to convert.
+            hint: The expected type or hint of the field's value that determines the
+                conversion.
+
+        Returns:
+            The parsed value, converted to the specified type.
+        """
+
+        if hint in {str, Optional[str]}:
+            return val
+        if hint is int:
+            return int(val)
+        if hint is Optional[int]:
+            return int(val) if val else None
+        if hint is float:
+            return float(val)
+        if hint is Optional[float]:
+            return float(val) if val else None
+        if hint is bool:
+            return val.lower() == "true"
+        if hint is Optional[bool]:
+            return val.lower() == "true" if val else None
+        if hint is Path:
+            return Path(val)
+        if hint is Optional[Path]:
+            return Path(val) if val else None
+
+        raise ValueError(f"Unsupported type '{hint}'")
+
+    def _env_fallback(
+        self, field, hint, *, path: str, section: str, source: str, missing_field: bool
+    ) -> Any:
+        env_var = self.env_var_name(field)
+
+        if missing_field:
+            log.info(
+                "Absent field; using an environment variable",
+                path=path,
+                section=section,
+                field=field.name,
+                env_var=env_var,
+            )
+        else:
+            log.debug(
+                f"Absent {source} section; using an environment variable",
+                path=path,
+                section=section,
+                field=field.name,
+                env_var=env_var,
+            )
+
+        return self.parse_environment_value(os.environ.get(env_var), hint)
+
+
+class IniData(BaseConfigData):
     """A configuration class that reads values from an INI file to create an instance of
     a specified dataclass. Using a dataclass results in configuration that is easier
     to understand and more maintainable than using a bare dictionary because all its
@@ -104,36 +224,7 @@ class IniData:
     INI file and environment variables, respectively.
     """
 
-    def __init__(self, cls: D, use_env: bool = False, env_prefix: str = ""):
-        """Makes a new configuration instance which can create instances of the
-        dataclass 'D'.
-
-        Args:
-            cls: A dataclass to bind to this configuration.
-            use_env: If True, fall back to environment variables if a value is not found
-                in an INI file. Defaults to False. The environment variable used to
-                supply a missing field's value is the field name in upper case
-                (prefixed with env_prefix, if provided).
-            env_prefix: A prefix to add to the name of any environment variable used as
-                a fallback. Defaults to "". The prefix is folded to upper case.
-                Dataclass field names exist in the context of their class. However,
-                environment variables exist in a global context and can benefit from a
-                more descriptive name. The prefix can be used to provide that.
-        """
-        if dataclass is None:
-            raise ValueError("A dataclass argument is required")
-        if not dataclasses.is_dataclass(cls):
-            raise ValueError(f"'{cls}' is not a dataclass")
-
-        self.dataclass = cls
-        self.use_env = use_env
-        self.env_prefix = env_prefix
-
-    def from_file(
-        self,
-        ini_file: PathLike | str,
-        section: str,
-    ) -> D:
+    def from_file(self, ini_file: PathLike | str, section: str) -> D:
         """Create a new dataclass instance from an INI file section.
 
         Args:
@@ -143,18 +234,22 @@ class IniData:
         Returns:
             A new dataclass instance with values populated from the INI file.
         """
-        p = Path(ini_file).resolve().absolute().as_posix()
+
+        path = Path(ini_file).resolve().absolute()
 
         log.info(
             "Reading configuration from file",
-            path=p,
+            path=path.as_posix(),
             section=section,
             dataclass=self.dataclass,
         )
 
+        if not path.exists():
+            raise FileNotFoundError(f"INI file '{path}' not found")
+
         parser = ConfigParser()
-        if not parser.read(p):
-            raise ParseError(f"Could not read '{p}'")
+        if not parser.read(path):
+            raise ParseError(f"Could not read '{path}'")
 
         hints = get_type_hints(self.dataclass)
         kwargs = {}
@@ -165,31 +260,25 @@ class IniData:
                 val = self.parse_ini_value(parser, section, field, hint)
 
                 if val is None and self.use_env:
-                    env_var = self.env_prefix.upper() + field.name.upper()
-                    log.info(
-                        "Absent field; using an environment variable",
-                        path=p,
+                    val = self._env_fallback(
+                        field,
+                        hint,
+                        path=path.as_posix(),
                         section=section,
-                        field=field.name,
-                        env_var=env_var,
+                        source="INI",
+                        missing_field=True,
                     )
-                    val = self.parse_environment_value(os.environ.get(env_var), hint)
 
                 kwargs[field.name] = val
 
             elif self.use_env:
-                env_var = self.env_prefix.upper() + field.name.upper()
-
-                log.debug(
-                    "Absent INI section; using an environment variable",
-                    path=p,
+                kwargs[field.name] = self._env_fallback(
+                    field,
+                    hint,
+                    path=path.as_posix(),
                     section=section,
-                    field=field.name,
-                    env_var=env_var,
-                )
-
-                kwargs[field.name] = self.parse_environment_value(
-                    os.environ.get(env_var), hint
+                    source="INI",
+                    missing_field=False,
                 )
 
         instance = self.dataclass(**kwargs)
@@ -205,79 +294,130 @@ class IniData:
         Args:
             parser: Configuration parser object used to read values.
             section: The section in the configuration file where the field resides.
-            field: The field object whose value is to be parsed and converted.
+            field: The dataclass field object whose value is to be parsed and converted.
             hint: The expected type or hint of the field's value that determines the
                 conversion.
 
         Returns:
             The parsed value converted to the type specified by the hint.
         """
-        parsed_val = None
 
         val = parser.get(section, field.name)
         val = "" if val is None else val.strip()
 
-        if hint is str:
-            parsed_val = val
-        elif bool(val):
-            if hint is int:
-                parsed_val = parser.getint(section, field.name)
-            elif hint is float:
-                parsed_val = parser.getfloat(section, field.name)
-            elif hint is bool:
-                parsed_val = parser.getboolean(section, field.name)
-            elif hint is Path:
-                parsed_val = Path(parser.get(section, field.name))
-            elif hint is Optional[str]:
-                parsed_val = parser.get(section, field.name)
-            elif hint is Optional[int]:
-                parsed_val = parser.getint(section, field.name)
-            elif hint is Optional[float]:
-                parsed_val = parser.getfloat(section, field.name)
-            elif hint is Optional[bool]:
-                parsed_val = parser.getboolean(section, field.name)
-            elif hint is Optional[Path]:
-                parsed_val = Path(parser.get(section, field.name))
+        if hint in {str, Optional[str]}:
+            return val
 
-        return parsed_val
+        if val == "":
+            return None
 
-    def parse_environment_value(self, val: str, hint) -> Any:
-        """
-        Parses an environment variable value and converts it to the specified type.
+        if hint in {int, Optional[int]}:
+            return parser.getint(section, field.name)
+        if hint in {float, Optional[float]}:
+            return parser.getfloat(section, field.name)
+        if hint in {bool, Optional[bool]}:
+            return parser.getboolean(section, field.name)
+        if hint in {Path, Optional[Path]}:
+            return Path(parser.get(section, field.name))
 
-        This function takes a string value and a type hint, converting the string into
-        the desired type. It supports the basic data types `str`, `int`, `float`, `bool`,
-        and instances of `Path`. Optional types for these primitive or file path types
-        are also supported. If an unsupported type is provided in the hint, a
-        ValueError` is raised.
+        return None
+
+
+class TomlData(BaseConfigData):
+    """A configuration class that reads values from a TOML file to create an instance
+    of a specified dataclass. It supports the same features as IniData.
+    """
+
+    def from_file(self, toml_file: PathLike | str, section: str) -> D:
+        """Create a new dataclass instance from a TOML file section.
 
         Args:
-            val: The string value to convert.
-            hint: The expected type or hint of the field's value that determines the
-                conversion.
+            toml_file: The TOML file path.
+            section: The section name containing the configuration.
 
         Returns:
-            The parsed value, converted to the specified type.
+            A new dataclass instance with values populated from the TOML file.
         """
-        if hint is str:
+
+        path = Path(toml_file).resolve().absolute()
+
+        log.info(
+            "Reading configuration from file",
+            path=path.as_posix(),
+            section=section,
+            dataclass=self.dataclass,
+        )
+
+        try:
+            with open(path, "rb") as handle:
+                data = tomllib.load(handle)
+        except tomllib.TOMLDecodeError as e:
+            raise ParseError(f"Could not read '{path}'") from e
+
+        section_data = data.get(section, {})
+        if section_data is None:
+            section_data = {}
+
+        hints = get_type_hints(self.dataclass)
+        kwargs = {}
+        for field in dataclasses.fields(self.dataclass):
+            hint = hints.get(field.name, None)
+
+            if field.name in section_data:
+                val = self.parse_toml_value(section_data.get(field.name), field, hint)
+
+                if val is None and self.use_env:
+                    val = self._env_fallback(
+                        field,
+                        hint,
+                        path=path.as_posix(),
+                        section=section,
+                        source="TOML",
+                        missing_field=True,
+                    )
+
+                kwargs[field.name] = val
+
+            elif self.use_env:
+                kwargs[field.name] = self._env_fallback(
+                    field,
+                    hint,
+                    path=path.as_posix(),
+                    section=section,
+                    source="TOML",
+                    missing_field=False,
+                )
+
+        instance = self.dataclass(**kwargs)
+        log.debug("Reading complete", instance=instance)
+
+        return instance
+
+    def parse_toml_value(self, val: Any, field, hint) -> Any:
+        """
+        Parses the value of a field from a TOML file.
+
+        TOML already supports native int, float and bool types, so this method avoids
+        coercing values based on type hints. It only handles empty strings for Optional
+        numeric/bool types and converts path strings into Path objects.
+
+        Args:
+            val: The value to parse.
+            field: The dataclass field object whose value is to be parsed and converted.
+            hint: The expected type or hint of the field's value that determines the
+                conversion for special cases.
+
+        Returns:
+            The parsed value converted to the type specified by the hint.
+        """
+
+        if hint in {str, Optional[str]}:
             return val
-        elif hint is int:
-            return int(val)
-        elif hint is float:
-            return float(val)
-        elif hint is bool:
-            return val.lower() == "true"
-        elif hint is Path:
+
+        if val == "":
+            return None
+
+        if hint in {Path, Optional[Path]}:
             return Path(val)
-        elif hint is Optional[str]:
-            return val
-        elif hint is Optional[int]:
-            return int(val) if val else None
-        elif hint is Optional[float]:
-            return float(val) if val else None
-        elif hint is Optional[bool]:
-            return val.lower() == "true" if val else None
-        elif hint is Optional[Path]:
-            return Path(val) if val else None
-        else:
-            raise ValueError(f"Unsupported type '{hint}'")
+
+        return val
