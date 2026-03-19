@@ -82,6 +82,19 @@ class TestOpenInputOutput:
 
         assert stream.closed
 
+    @m.context("When reading from a file path with an explicit encoding")
+    @m.it("Passes encoding through to Path.open")
+    def test_open_input_passes_encoding_kwarg_to_path_open(self, tmp_path):
+        path = tmp_path / "input-utf16.txt"
+        expected = "hello café\n"
+        path.write_text(expected, encoding="utf-16")
+
+        with open_input(str(path), "rt", encoding="utf-16") as stream:
+            assert stream.read() == expected
+
+        with open_input(str(path), "rt", encoding="latin-1") as stream:
+            assert stream.read() != expected
+
     @pytest.mark.parametrize("path", ["-", None])
     @m.context("When writing text to a default output path")
     @m.it("Uses sys.stdout for '-' or None")
@@ -106,3 +119,16 @@ class TestOpenInputOutput:
 
         assert stream.closed
         assert path.read_text(encoding="utf-8") == "hello\n"
+
+    @m.context("When writing to a file path with an explicit encoding")
+    @m.it("Passes encoding through to Path.open")
+    def test_open_output_passes_encoding_kwarg_to_path_open(self, tmp_path):
+        path = tmp_path / "output-utf16.txt"
+        expected = "hello café\n"
+
+        with open_output(str(path), "wt", encoding="utf-16") as stream:
+            stream.write(expected)
+
+        assert stream.closed
+        assert path.read_text(encoding="utf-16") == expected
+        assert path.read_text(encoding="latin-1") != expected

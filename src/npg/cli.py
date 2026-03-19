@@ -199,9 +199,15 @@ def integer_in_range(minimum: int, maximum: int):
 
 @contextmanager
 def open_input(
-    path: str | None, mode: str = "rt"
+    path: str | None, mode="rt", **kwargs
 ) -> Generator[BinaryIO | TextIO | Any, Any, None]:
     """Open a file for reading or use STDIN if the supplied path is '-' or None.
+
+
+    Args:
+        path: File path.
+        mode: File open mode. Default is 'rt'.
+        kwargs: Other keyword arguments passed to ``Path.open`` if STDIN is not used.
 
     This is meant to be used as a context manager together with ``add_io_arguments``.
 
@@ -222,7 +228,7 @@ def open_input(
             yield sys.stdin
         return
 
-    stream = Path(path).open(mode=mode)
+    stream = Path(path).open(mode=mode, **kwargs)
     try:
         yield stream
     finally:
@@ -231,9 +237,14 @@ def open_input(
 
 @contextmanager
 def open_output(
-    path: str | None, mode: str = "wt"
+    path: str | None, mode="wt", **kwargs
 ) -> Generator[BinaryIO | TextIO | Any, Any, None]:
     """Open a file for writing or use STDOUT if the supplied path is '-' or None.
+
+    Args:
+        path: File path.
+        mode: File open mode. Default is 'wt'.
+        kwargs: Other keyword arguments passed to ``Path.open`` if STDOUT is not used.
 
     This is meant to be used as a context manager together with ``add_io_arguments``.
 
@@ -245,6 +256,7 @@ def open_output(
             print("Hello, world!", file=output)
 
     """
+
     bin_mode = "b" in mode
     if path in (None, "-"):
         if bin_mode:
@@ -253,7 +265,7 @@ def open_output(
             yield sys.stdout
         return
 
-    stream = Path(path).open(mode=mode)
+    stream = Path(path).open(mode=mode, **kwargs)
     try:
         yield stream
     finally:
