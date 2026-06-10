@@ -14,7 +14,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
+import dataclasses
+import json
 import logging
 from configparser import ConfigParser
 from dataclasses import dataclass, field
@@ -23,10 +24,11 @@ from typing import Any, Optional
 from unittest.mock import patch
 
 import pytest
+from _pytest.config import Config
 from pytest import mark as m
 from structlog.testing import capture_logs
 
-from npg.conf import IniData, TomlData
+from npg.conf import IniData, TomlData, config_class
 
 
 @dataclass
@@ -588,3 +590,136 @@ class TestTomlData:
             assert parser.from_file(toml_file, section) == ConfigWithCustomValue(
                 key1=CustomValue(env_val1), key2=val2
             )
+
+
+@config_class
+class ConfigWithFieldVariations:
+    auto_hidden: str  # A field we want to be automatically hidden i.e. a secret
+    explicit_visible: str = field(repr=True)  # A field we explicitly specify visible
+    explicit_hidden: str = field(repr=False)  # A field we explicitly specify hidden
+    non_repr: str = field(
+        default="non_repr"
+    )  # A field where we've configured a non-repr property
+    class_default: str = "class_default"  # A field with a class default
+    attribute = "attribute"  # An attribute that's not a dataclass field
+
+
+@m.describe("config_class")
+class TestConfig:
+    @m.context(
+        "When a field is specified with type annotation and no default value or field call"
+    )
+    @m.it("Does not include the field in string representation")
+    def test_auto_hidden(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "auto_hidden" not in str(config)
+        assert "auto_hidden" not in repr(config)
+
+    @m.context("When a field is explicitly specified visible")
+    @m.it("Includes the field in string representation")
+    def test_explicit_visible(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "explicit_visible" in str(config)
+        assert "explicit_visible" in repr(config)
+
+    @m.context("When a field is explicitly specified hidden")
+    @m.it("Does not include the field in string representation")
+    def test_explicit_hidden(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "explicit_hidden" not in str(config)
+        assert "explicit_hidden" not in repr(config)
+
+    @m.context("When field used without specifying repr")
+    @m.it("Includes the field in string representation")
+    def test_non_repr(self):
+        # Test documents accepted limitation
+        # When someone uses field without specifying get the repr=True default
+        # There isn't a way within decorator to distinguish between someone having
+        # explicitly specified repr=True or used the default
+        # There are alternatives like providing a config_field with different defaults
+        # and forcing use within config_class but decided against
+
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "non_repr" in str(config)
+        assert "non_repr" in repr(config)
+
+    @m.context("When a field has a class default")
+    @m.it("Does not include the field in string representation")
+    def test_class_default(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "class_default" not in str(config)
+        assert "class_default" not in repr(config)
+        assert config.class_default == "class_default"
+
+        # Whilst we create an intermediary field, we still end up with same end point
+        # of class attribute containing default value
+        # https://docs.python.org/3/library/dataclasses.html#dataclasses.field
+        assert ConfigWithFieldVariations.class_default == "class_default"
+
+    @m.context("When a field has an attribute that's not a dataclass field")
+    @m.it("Does not include the field in string representation")
+    def test_attribute(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "attribute" not in str(config)
+        assert "attribute" not in repr(config)
+        assert config.attribute == "attribute"
+
+    @m.it("Prevents modifying fields")
+    def test_modifying_fields(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            config.auto_hidden = "modified"
+        assert config.auto_hidden == "auto_hidden"
+
+        # Accepted limitation
+        # Could set slots=True but solution becomes harder to understand
+        config.__dict__["auto_hidden"] = "modified"
+        assert config.auto_hidden == "modified"
+
+    @m.it("Prevents adding fields")
+    def test_adding_fields(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            config.another_secret = "another_secret"
+        assert not hasattr(config, "another_secret")
+
+        # Could set slots=True but solution becomes harder to understand
+        config.__dict__["another_secret"] = "another_secret"
+        assert config.another_secret == "another_secret"
+
+    @m.context("When interact with as dict")
+    @m.it("Includes hidden fields in string representation")
+    def test_accepted_limitations(self):
+        # Test documents accepted limitation
+        # Could mitigate with custom Secret class
+
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "auto_hidden" in str(dataclasses.asdict(config))
+        assert "auto_hidden" in str(config.__dict__)
