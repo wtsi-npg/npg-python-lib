@@ -475,7 +475,6 @@ def config_class(cls=None, **dataclass_kwargs):
                 setattr(c, name, dataclasses.field(repr=False))
             elif not isinstance(value, dataclasses.Field):
                 setattr(c, name, dataclasses.field(default=value, repr=False))
-                # TODO: Test class attribute
 
         # By default, data class fields can be modified and new attributes added.
         # Reverse default.
