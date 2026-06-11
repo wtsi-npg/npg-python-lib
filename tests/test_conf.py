@@ -722,4 +722,58 @@ class TestConfig:
         assert "auto_hidden" in str(dataclasses.asdict(config))
         assert "auto_hidden" in str(config.__dict__)
 
-class TestIniDataConfig
+
+@m.describe("IniData and config_class")
+class TestIniDataConfigClass:
+    @m.context("When IniData used with @config_class")
+    @m.it("Populates fields and doesn't log hidden fields")
+    def test_ini_data_config_class(self, tmp_path, caplog):
+        ini_file = tmp_path / "config.ini"
+        section = "section"
+        ini_file.write_text(
+            f"[{section}]\nauto_hidden=auto_hidden\nexplicit_visible=explicit_visible\nexplicit_hidden=explicit_hidden\nattribute=should_ignore\n"
+        )
+
+        with caplog.at_level(logging.DEBUG):
+            with capture_logs() as cap_logs:
+                config = IniData(ConfigWithFieldVariations).from_file(ini_file, section)
+
+                assert config == ConfigWithFieldVariations(
+                    "auto_hidden", "explicit_visible", "explicit_hidden"
+                )
+                all_logs = str(cap_logs)
+                assert "auto_hidden" not in all_logs
+                assert "explicit_hidden" not in all_logs
+                assert "class_default" not in all_logs
+                assert "attribute" not in all_logs
+                assert "explicit_visible" in all_logs
+                assert "non_repr" in all_logs, "Accepted limitation"
+
+
+@m.describe("TomlData and config_class")
+class TestTomlDataConfigClass:
+    @m.context("When TomlData used with @config_class")
+    @m.it("Populates fields and doesn't log hidden fields")
+    def test_toml_data_config_class(self, tmp_path, caplog):
+        toml_file = tmp_path / "config.ini"
+        section = "section"
+        toml_file.write_text(
+            f'[{section}]\nauto_hidden = "auto_hidden"\nexplicit_visible = "explicit_visible"\nexplicit_hidden = "explicit_hidden"\nattribute = "should_ignore"\n'
+        )
+
+        with caplog.at_level(logging.DEBUG):
+            with capture_logs() as cap_logs:
+                config = TomlData(ConfigWithFieldVariations).from_file(
+                    toml_file, section
+                )
+
+                assert config == ConfigWithFieldVariations(
+                    "auto_hidden", "explicit_visible", "explicit_hidden"
+                )
+                all_logs = str(cap_logs)
+                assert "auto_hidden" not in all_logs
+                assert "explicit_hidden" not in all_logs
+                assert "class_default" not in all_logs
+                assert "attribute" not in all_logs
+                assert "explicit_visible" in all_logs
+                assert "non_repr" in all_logs, "Accepted limitation"
