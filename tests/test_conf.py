@@ -15,7 +15,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import dataclasses
-import json
 import logging
 from configparser import ConfigParser
 from dataclasses import dataclass, field
@@ -24,7 +23,6 @@ from typing import Any, Optional
 from unittest.mock import patch
 
 import pytest
-from _pytest.config import Config
 from pytest import mark as m
 from structlog.testing import capture_logs
 
@@ -723,3 +721,5 @@ class TestConfig:
 
         assert "auto_hidden" in str(dataclasses.asdict(config))
         assert "auto_hidden" in str(config.__dict__)
+
+class TestIniDataConfig
