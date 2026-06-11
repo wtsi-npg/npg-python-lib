@@ -433,7 +433,8 @@ _MISSING = object()
     field_specifiers=(
         dataclasses.Field,
         dataclasses.field,
-    )
+    ),
+    frozen_default=True
 )
 def config_class(cls=None, **dataclass_kwargs):
     """
