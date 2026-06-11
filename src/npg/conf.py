@@ -456,6 +456,13 @@ def config_class(cls=None, **dataclass_kwargs):
             e: str = field(default="e") # Default repr=True
 
     Also create default frozen, preventing modifying fields.
+
+    Supports [dataclass like inheritance](https://docs.python.org/3/library/dataclasses.html#inheritance),
+    e.g. use @config_class on parent and child classes.
+
+    If you subclass a config_class wrapped class without wrapping the subclass,
+    fields hidden by config_class will still be hidden however adding new
+    fields will not work.
     """
 
     def wrap(c):

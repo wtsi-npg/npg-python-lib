@@ -16,6 +16,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import dataclasses
 import logging
+import re
 from configparser import ConfigParser
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -602,6 +603,16 @@ class ConfigWithFieldVariations:
     attribute = "attribute"  # An attribute that's not a dataclass field
 
 
+class ConfigWithNotWrappedConfigClassSubclass(ConfigWithFieldVariations):
+    subclass_field: str  # To demonstrate won't work
+
+
+@config_class
+class ConfigWithWrappedConfigClassSubclass(ConfigWithFieldVariations):
+    subclass_field_hidden: str = "subclass_field_hidden"
+    subclass_field_visible: str = field(default="subclass_field_visible", repr=True)
+
+
 @m.describe("config_class")
 class TestConfig:
     @m.context(
@@ -721,6 +732,79 @@ class TestConfig:
 
         assert "auto_hidden" in str(dataclasses.asdict(config))
         assert "auto_hidden" in str(config.__dict__)
+
+    @m.context("When subclass a wrapped class without wrapping subclass")
+    @m.it("Fields hidden by @config_class are still hidden")
+    def test_subclass_preserves_hidden_fields(self):
+        config = ConfigWithNotWrappedConfigClassSubclass(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        output = str(config) + repr(config)
+
+        assert "auto_hidden" not in output
+        assert "explicit_hidden" not in output
+        assert "class_default" not in output
+        assert "attribute" not in output
+        assert "explicit_visible" in output
+        assert "non_repr" in output, "Accepted limitation"
+
+    @m.context("When subclass a wrapped class without wrapping subclass")
+    @m.context("And try to add a dataclass field")
+    @m.it("Will not work")
+    def test_subclass_cannot_add_dataclass_fields(self):
+        # Test to make explicit need to wrap subclasses too to use dataclass features
+
+        assert (
+            ConfigWithNotWrappedConfigClassSubclass.__init__
+            == ConfigWithFieldVariations.__init__
+        ), "Dunder methods created by dataclass directly inherited"
+
+        with pytest.raises(
+            TypeError,
+            match=re.escape(
+                "ConfigWithFieldVariations.__init__() got an unexpected keyword argument 'subclass_field'"
+            ),
+        ):
+            ConfigWithNotWrappedConfigClassSubclass(
+                "auto_hidden",
+                "explicit_visible",
+                "explicit_hidden",
+                subclass_field="subclass_field",
+            )
+
+        config = ConfigWithNotWrappedConfigClassSubclass(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert not hasattr(config, "subclass_field_annotation")
+
+    @m.context("When subclass a wrapped class and wrap subclass")
+    @m.it("Supports inheritance")
+    def test_subclass_preserves_hidden_fields(self):
+        # https://docs.python.org/3/library/dataclasses.html#inheritance
+
+        config = ConfigWithWrappedConfigClassSubclass(
+            "auto_hidden",
+            "explicit_visible",
+            "explicit_hidden",
+            subclass_field_visible="modified1",
+            subclass_field_hidden="modified2",
+        )
+
+        output = str(config) + repr(config)
+
+        assert "auto_hidden" not in output
+        assert "explicit_hidden" not in output
+        assert "class_default" not in output
+        assert "attribute" not in output
+        assert "subclass_field_hidden" not in output
+        assert "explicit_visible" in output
+        assert "non_repr" in output, "Accepted limitation"
+        assert "subclass_field_visible" in output
+
+        assert config.subclass_field_visible == "modified1"
+        assert config.subclass_field_hidden == "modified2"
 
 
 @m.describe("IniData and config_class")
