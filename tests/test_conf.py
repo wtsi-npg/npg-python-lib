@@ -14,8 +14,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
+import dataclasses
 import logging
+import re
 from configparser import ConfigParser
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,7 +27,7 @@ import pytest
 from pytest import mark as m
 from structlog.testing import capture_logs
 
-from npg.conf import IniData, TomlData
+from npg.conf import IniData, TomlData, config_class
 
 
 @dataclass
@@ -588,3 +589,275 @@ class TestTomlData:
             assert parser.from_file(toml_file, section) == ConfigWithCustomValue(
                 key1=CustomValue(env_val1), key2=val2
             )
+
+
+@config_class
+class ConfigWithFieldVariations:
+    auto_hidden: str  # A field we want to be automatically hidden i.e. a secret
+    explicit_visible: str = field(repr=True)  # A field we explicitly specify visible
+    explicit_hidden: str = field(repr=False)  # A field we explicitly specify hidden
+    non_repr: str = field(
+        default="non_repr"
+    )  # A field where we've configured a non-repr property
+    class_default: str = "class_default"  # A field with a class default
+    attribute = "attribute"  # An attribute that's not a dataclass field
+
+
+class ConfigWithNotWrappedConfigClassSubclass(ConfigWithFieldVariations):
+    subclass_field: str  # To demonstrate won't work
+
+
+@config_class
+class ConfigWithWrappedConfigClassSubclass(ConfigWithFieldVariations):
+    subclass_field_hidden: str = "subclass_field_hidden"
+    subclass_field_visible: str = field(default="subclass_field_visible", repr=True)
+
+
+@m.describe("config_class")
+class TestConfig:
+    @m.context(
+        "When a field is specified with type annotation and no default value or field call"
+    )
+    @m.it("Does not include the field in string representation")
+    def test_auto_hidden(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "auto_hidden" not in str(config)
+        assert "auto_hidden" not in repr(config)
+
+    @m.context("When a field is explicitly specified visible")
+    @m.it("Includes the field in string representation")
+    def test_explicit_visible(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "explicit_visible" in str(config)
+        assert "explicit_visible" in repr(config)
+
+    @m.context("When a field is explicitly specified hidden")
+    @m.it("Does not include the field in string representation")
+    def test_explicit_hidden(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "explicit_hidden" not in str(config)
+        assert "explicit_hidden" not in repr(config)
+
+    @m.context("When field used without specifying repr")
+    @m.it("Includes the field in string representation")
+    def test_non_repr(self):
+        # Test documents accepted limitation
+        # When someone uses field without specifying get the repr=True default
+        # There isn't a way within decorator to distinguish between someone having
+        # explicitly specified repr=True or used the default
+        # There are alternatives like providing a config_field with different defaults
+        # and forcing use within config_class but decided against
+
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "non_repr" in str(config)
+        assert "non_repr" in repr(config)
+
+    @m.context("When a field has a class default")
+    @m.it("Does not include the field in string representation")
+    def test_class_default(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "class_default" not in str(config)
+        assert "class_default" not in repr(config)
+        assert config.class_default == "class_default"
+
+        # Whilst we create an intermediary field, we still end up with same end point
+        # of class attribute containing default value
+        # https://docs.python.org/3/library/dataclasses.html#dataclasses.field
+        assert ConfigWithFieldVariations.class_default == "class_default"
+
+    @m.context("When a field has an attribute that's not a dataclass field")
+    @m.it("Does not include the field in string representation")
+    def test_attribute(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "attribute" not in str(config)
+        assert "attribute" not in repr(config)
+        assert config.attribute == "attribute"
+
+    @m.it("Prevents modifying fields")
+    def test_modifying_fields(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            config.auto_hidden = "modified"
+        assert config.auto_hidden == "auto_hidden"
+
+        # Accepted limitation
+        # Could set slots=True but solution becomes harder to understand
+        config.__dict__["auto_hidden"] = "modified"
+        assert config.auto_hidden == "modified"
+
+    @m.it("Prevents adding fields")
+    def test_adding_fields(self):
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            config.another_secret = "another_secret"
+        assert not hasattr(config, "another_secret")
+
+        # Could set slots=True but solution becomes harder to understand
+        config.__dict__["another_secret"] = "another_secret"
+        assert config.another_secret == "another_secret"
+
+    @m.context("When interact with as dict")
+    @m.it("Includes hidden fields in string representation")
+    def test_accepted_limitations(self):
+        # Test documents accepted limitation
+        # Could mitigate with custom Secret class
+
+        config = ConfigWithFieldVariations(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert "auto_hidden" in str(dataclasses.asdict(config))
+        assert "auto_hidden" in str(config.__dict__)
+
+    @m.context("When subclass a wrapped class without wrapping subclass")
+    @m.it("Fields hidden by @config_class are still hidden")
+    def test_subclass_preserves_hidden_fields(self):
+        config = ConfigWithNotWrappedConfigClassSubclass(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        output = str(config) + repr(config)
+
+        assert "auto_hidden" not in output
+        assert "explicit_hidden" not in output
+        assert "class_default" not in output
+        assert "attribute" not in output
+        assert "explicit_visible" in output
+        assert "non_repr" in output, "Accepted limitation"
+
+    @m.context("When subclass a wrapped class without wrapping subclass")
+    @m.context("And try to add a dataclass field")
+    @m.it("Will not work")
+    def test_subclass_cannot_add_dataclass_fields(self):
+        # Test to make explicit need to wrap subclasses too to use dataclass features
+
+        assert (
+            ConfigWithNotWrappedConfigClassSubclass.__init__
+            == ConfigWithFieldVariations.__init__
+        ), "Dunder methods created by dataclass directly inherited"
+
+        with pytest.raises(
+            TypeError,
+            match=re.escape(
+                "ConfigWithFieldVariations.__init__() got an unexpected keyword argument 'subclass_field'"
+            ),
+        ):
+            ConfigWithNotWrappedConfigClassSubclass(
+                "auto_hidden",
+                "explicit_visible",
+                "explicit_hidden",
+                subclass_field="subclass_field",
+            )
+
+        config = ConfigWithNotWrappedConfigClassSubclass(
+            "auto_hidden", "explicit_visible", "explicit_hidden"
+        )
+
+        assert not hasattr(config, "subclass_field_annotation")
+
+    @m.context("When subclass a wrapped class and wrap subclass")
+    @m.it("Supports inheritance")
+    def test_subclass_preserves_hidden_fields(self):
+        # https://docs.python.org/3/library/dataclasses.html#inheritance
+
+        config = ConfigWithWrappedConfigClassSubclass(
+            "auto_hidden",
+            "explicit_visible",
+            "explicit_hidden",
+            subclass_field_visible="modified1",
+            subclass_field_hidden="modified2",
+        )
+
+        output = str(config) + repr(config)
+
+        assert "auto_hidden" not in output
+        assert "explicit_hidden" not in output
+        assert "class_default" not in output
+        assert "attribute" not in output
+        assert "subclass_field_hidden" not in output
+        assert "explicit_visible" in output
+        assert "non_repr" in output, "Accepted limitation"
+        assert "subclass_field_visible" in output
+
+        assert config.subclass_field_visible == "modified1"
+        assert config.subclass_field_hidden == "modified2"
+
+
+@m.describe("IniData and config_class")
+class TestIniDataConfigClass:
+    @m.context("When IniData used with @config_class")
+    @m.it("Populates fields and doesn't log hidden fields")
+    def test_ini_data_config_class(self, tmp_path, caplog):
+        ini_file = tmp_path / "config.ini"
+        section = "section"
+        ini_file.write_text(
+            f"[{section}]\nauto_hidden=auto_hidden\nexplicit_visible=explicit_visible\nexplicit_hidden=explicit_hidden\nattribute=should_ignore\n"
+        )
+
+        with caplog.at_level(logging.DEBUG):
+            with capture_logs() as cap_logs:
+                config = IniData(ConfigWithFieldVariations).from_file(ini_file, section)
+
+                assert config == ConfigWithFieldVariations(
+                    "auto_hidden", "explicit_visible", "explicit_hidden"
+                )
+                all_logs = str(cap_logs)
+                assert "auto_hidden" not in all_logs
+                assert "explicit_hidden" not in all_logs
+                assert "class_default" not in all_logs
+                assert "attribute" not in all_logs
+                assert "explicit_visible" in all_logs
+                assert "non_repr" in all_logs, "Accepted limitation"
+
+
+@m.describe("TomlData and config_class")
+class TestTomlDataConfigClass:
+    @m.context("When TomlData used with @config_class")
+    @m.it("Populates fields and doesn't log hidden fields")
+    def test_toml_data_config_class(self, tmp_path, caplog):
+        toml_file = tmp_path / "config.ini"
+        section = "section"
+        toml_file.write_text(
+            f'[{section}]\nauto_hidden = "auto_hidden"\nexplicit_visible = "explicit_visible"\nexplicit_hidden = "explicit_hidden"\nattribute = "should_ignore"\n'
+        )
+
+        with caplog.at_level(logging.DEBUG):
+            with capture_logs() as cap_logs:
+                config = TomlData(ConfigWithFieldVariations).from_file(
+                    toml_file, section
+                )
+
+                assert config == ConfigWithFieldVariations(
+                    "auto_hidden", "explicit_visible", "explicit_hidden"
+                )
+                all_logs = str(cap_logs)
+                assert "auto_hidden" not in all_logs
+                assert "explicit_hidden" not in all_logs
+                assert "class_default" not in all_logs
+                assert "attribute" not in all_logs
+                assert "explicit_visible" in all_logs
+                assert "non_repr" in all_logs, "Accepted limitation"

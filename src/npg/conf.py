@@ -20,10 +20,10 @@ import os
 import tomllib
 from abc import ABC, abstractmethod
 from configparser import ConfigParser
-from dataclasses import Field, dataclass
+from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
-from typing import Any, Optional, TypeVar, get_type_hints
+from typing import Any, Optional, TypeVar, get_type_hints, dataclass_transform
 
 from structlog import get_logger
 
@@ -218,6 +218,8 @@ class IniData(BaseConfigData):
         @dataclass
         class ServerConfig:
             admin-token: str = field(repr=False)
+
+    See also config_class.
 
     To extend this class to support additional field types, you can override the
     parse_ini_value and parse_environment_value methods. These handle values from the
@@ -421,3 +423,65 @@ class TomlData(BaseConfigData):
             return Path(val)
 
         return val
+
+
+# Sentinel object
+_MISSING = object()
+
+
+@dataclass_transform(
+    field_specifiers=(
+        dataclasses.Field,
+        dataclasses.field,
+    ),
+    frozen_default=True,
+)
+def config_class(cls=None, **dataclass_kwargs):
+    """
+    A variation of Python's standard library dataclass decorator with tweaked
+    defaults for config.
+
+    With dataclass, by default fields are included in string representations.
+    config_class reverses this default for common cases e.g. to avoid sensitive
+    information being logged:
+
+        @config_class
+        class Config:
+            # Hidden from string representations
+            a: str
+            b: str = field(repr=False)
+            c: str = "default"
+            # Exceptions
+            d: str = field(repr=True)
+            e: str = field(default="e") # Default repr=True
+
+    Also create default frozen, preventing modifying fields.
+
+    Supports [dataclass like inheritance](https://docs.python.org/3/library/dataclasses.html#inheritance),
+    e.g. use @config_class on parent and child classes.
+
+    If you subclass a config_class wrapped class without wrapping the subclass,
+    fields hidden by config_class will still be hidden however adding new
+    fields will not work.
+    """
+
+    def wrap(c):
+        annotations = getattr(c, "__annotations__", {})
+
+        # Hide field in string representations (set repr=False) by default
+        for name in annotations:
+            value = c.__dict__.get(name, _MISSING)
+            if value is _MISSING:
+                setattr(c, name, dataclasses.field(repr=False))
+            elif not isinstance(value, dataclasses.Field):
+                setattr(c, name, dataclasses.field(default=value, repr=False))
+
+        # By default, data class fields can be modified and new attributes added.
+        # Reverse default.
+        # https://docs.python.org/3/library/dataclasses.html#dataclasses.dataclass
+        # https://docs.python.org/3/library/dataclasses.html#dataclasses-frozen
+        dataclass_kwargs.setdefault("frozen", True)
+
+        return dataclass(**dataclass_kwargs)(c)
+
+    return wrap if cls is None else wrap(cls)
