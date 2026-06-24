@@ -63,8 +63,8 @@ class BaseConfigData(ABC):
                 more descriptive name. The prefix can be used to provide that.
         """
 
-        if dataclass is None:
-            raise ValueError("A dataclass argument is required")
+        if cls is None:
+            raise ValueError("A cls argument is required")
         if not dataclasses.is_dataclass(cls):
             raise ValueError(f"'{cls}' is not a dataclass")
 
