@@ -430,10 +430,7 @@ _MISSING = object()
 
 
 @dataclass_transform(
-    field_specifiers=(
-        dataclasses.Field,
-        dataclasses.field,
-    ),
+    field_specifiers=(dataclasses.field,),
     frozen_default=True,
 )
 def config_class(cls=None, **dataclass_kwargs):
