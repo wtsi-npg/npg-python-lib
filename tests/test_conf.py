@@ -781,7 +781,7 @@ class TestConfig:
 
     @m.context("When subclass a wrapped class and wrap subclass")
     @m.it("Supports inheritance")
-    def test_subclass_preserves_hidden_fields(self):
+    def test_wrapped_subclass(self):
         # https://docs.python.org/3/library/dataclasses.html#inheritance
 
         config = ConfigWithWrappedConfigClassSubclass(
