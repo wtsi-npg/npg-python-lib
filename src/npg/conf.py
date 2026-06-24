@@ -467,6 +467,8 @@ def config_class(cls=None, **dataclass_kwargs):
     """
 
     def wrap(c):
+        # Incurs MRO walk but negligible and `c.__dict__.get()` approach
+        # doesn't work on 3.14
         annotations = getattr(c, "__annotations__", {})
 
         # Hide field in string representations (set repr=False) by default
