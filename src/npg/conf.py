@@ -63,8 +63,8 @@ class BaseConfigData(ABC):
                 more descriptive name. The prefix can be used to provide that.
         """
 
-        if dataclass is None:
-            raise ValueError("A dataclass argument is required")
+        if cls is None:
+            raise ValueError("A cls argument is required")
         if not dataclasses.is_dataclass(cls):
             raise ValueError(f"'{cls}' is not a dataclass")
 
@@ -219,7 +219,7 @@ class IniData(BaseConfigData):
         class ServerConfig:
             admin-token: str = field(repr=False)
 
-    See also config_class.
+    See also `config_class` which configures fields to not be logged by default.
 
     To extend this class to support additional field types, you can override the
     parse_ini_value and parse_environment_value methods. These handle values from the
@@ -430,10 +430,7 @@ _MISSING = object()
 
 
 @dataclass_transform(
-    field_specifiers=(
-        dataclasses.Field,
-        dataclasses.field,
-    ),
+    field_specifiers=(dataclasses.field,),
     frozen_default=True,
 )
 def config_class(cls=None, **dataclass_kwargs):
@@ -460,12 +457,18 @@ def config_class(cls=None, **dataclass_kwargs):
     Supports [dataclass like inheritance](https://docs.python.org/3/library/dataclasses.html#inheritance),
     e.g. use @config_class on parent and child classes.
 
-    If you subclass a config_class wrapped class without wrapping the subclass,
-    fields hidden by config_class will still be hidden however adding new
-    fields will not work.
+    Limitations:
+    - If you subclass a config_class wrapped class without wrapping the subclass,
+      fields hidden by config_class will still be hidden however adding new
+      fields will not work.
+    - As above, if you explicitly call field(), repr will default True and the
+      field will be included in string representations.
+    - Config can be modified using __dict__. Use slots=True to disable.
     """
 
     def wrap(c):
+        # Incurs MRO walk but negligible and `c.__dict__.get()` approach
+        # doesn't work on 3.14
         annotations = getattr(c, "__annotations__", {})
 
         # Hide field in string representations (set repr=False) by default
