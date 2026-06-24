@@ -460,9 +460,13 @@ def config_class(cls=None, **dataclass_kwargs):
     Supports [dataclass like inheritance](https://docs.python.org/3/library/dataclasses.html#inheritance),
     e.g. use @config_class on parent and child classes.
 
-    If you subclass a config_class wrapped class without wrapping the subclass,
-    fields hidden by config_class will still be hidden however adding new
-    fields will not work.
+    Limitations:
+    - If you subclass a config_class wrapped class without wrapping the subclass,
+      fields hidden by config_class will still be hidden however adding new
+      fields will not work.
+    - As above, if you explicitly call field(), repr will default True and the
+      field will be included in string representations.
+    - Config can be modified using __dict__. Use slots=True to disable.
     """
 
     def wrap(c):

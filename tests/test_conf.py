@@ -613,6 +613,11 @@ class ConfigWithWrappedConfigClassSubclass(ConfigWithFieldVariations):
     subclass_field_visible: str = field(default="subclass_field_visible", repr=True)
 
 
+@config_class(slots=True)
+class ConfigWithSlots:
+    auto_hidden: str
+
+
 @m.describe("config_class")
 class TestConfig:
     @m.context(
@@ -805,6 +810,17 @@ class TestConfig:
 
         assert config.subclass_field_visible == "modified1"
         assert config.subclass_field_hidden == "modified2"
+
+    @m.it("Supports slots=True")
+    def test_slots(self):
+        config = ConfigWithSlots("auto_hidden")
+
+        assert "auto_hidden" not in str(config)
+        assert "auto_hidden" not in repr(config)
+
+        with pytest.raises(AttributeError):
+            config.__dict__["another_secret"] = "another_secret"
+        assert not hasattr(config, "another_secret")
 
 
 @m.describe("IniData and config_class")
