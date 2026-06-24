@@ -219,7 +219,7 @@ class IniData(BaseConfigData):
         class ServerConfig:
             admin-token: str = field(repr=False)
 
-    See also config_class.
+    See also `config_class` which configures fields to not be logged by default.
 
     To extend this class to support additional field types, you can override the
     parse_ini_value and parse_environment_value methods. These handle values from the
