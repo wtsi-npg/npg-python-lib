@@ -467,7 +467,7 @@ def config_class(cls=None, **dataclass_kwargs):
     """
 
     def wrap(c):
-        annotations = c.__dict__.get("__annotations__", {})
+        annotations = getattr(c, "__annotations__", {})
 
         # Hide field in string representations (set repr=False) by default
         for name in annotations:
