@@ -17,6 +17,7 @@
 
 import json as json_parser
 import logging.config
+from os import PathLike
 
 import structlog
 
@@ -24,7 +25,11 @@ import structlog
 
 
 def configure_structlog(
-    config_file=None, debug=False, verbose=False, colour=False, json=False
+    config_file: str | PathLike[str] | None = None,
+    debug=False,
+    verbose=False,
+    colour=False,
+    json=False,
 ):
     """Configure logging with a file, or individual parameters.
 
@@ -38,6 +43,8 @@ def configure_structlog(
     dictionary.
 
     See https://docs.python.org/3/library/logging.config.html#configuration-dictionary-schema
+
+    Falls back to logging to STDERR on issue with configuration file.
 
         Args:
             config_file: A file path. Optional. If provided, the debug and verbose
@@ -90,11 +97,18 @@ def configure_structlog(
         ),
     ]
 
-    if config_file is not None:
-        with open(config_file, "rb") as f:
-            conf = json_parser.load(f)
-            logging.config.dictConfig(conf)
-    else:
+    config_file_error: Exception | None = None
+
+    if config_file:
+        try:
+            with open(config_file, "rb") as f:
+                conf = json_parser.load(f)
+                logging.config.dictConfig(conf)
+        except Exception as e:
+            # Capture so we can log later when setup
+            config_file_error = e
+
+    if not config_file or config_file_error:
         level = logging.ERROR
         if debug:
             level = logging.DEBUG
@@ -113,3 +127,13 @@ def configure_structlog(
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
+
+    log = structlog.stdlib.get_logger()
+
+    # Now we can log
+    if config_file_error:
+        log.critical(
+            "Could not configure logging from file. Falling back to defaults.",
+            config_file=config_file,
+            exc_info=config_file_error,
+        )
