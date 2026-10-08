@@ -1,7 +1,8 @@
 [project]
 name = "npg-python-lib"
 description = "A library of Python functions and classes common to NPG applications."
-license = { file = "LICENSE", content-type = "text/plain" }
+license = "GPL-3.0-or-later AND BSD-3-Clause"
+license-files = ["LICENSE", "src/npg/_vendor/sqlalchemy_utils/LICENSE"]
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [{ name = "Keith James", email = "kdj@sanger.ac.uk" }]
 classifiers = [
@@ -20,10 +21,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+db = ["SQLAlchemy >=2,<3"]
 test = [
     "black >=26,<27",
     "pytest >=9,<10",
-    "pytest-it >=0.1.5"
+    "pytest-it >=0.1.5",
+    "SQLAlchemy >=2,<3"
 ]
 
 [project.urls]
@@ -41,5 +44,12 @@ build-backend = "setuptools.build_meta"
 #
 # https://setuptools.pypa.io/en/latest/userguide/package_discovery.html#src-layout
 
+[tool.setuptools.package-data]
+"npg._vendor.sqlalchemy_utils" = ["LICENSE", "README.md"]
+
 [tool.setuptools-git-versioning]
 enabled = true
+
+[tool.black]
+# Preserve upstream formatting to simplify reviewing vendored updates.
+extend-exclude = "/src/npg/_vendor/"
