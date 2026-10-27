@@ -14,6 +14,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 import dataclasses
 import logging
 import re
@@ -83,11 +84,11 @@ class ConfigWithCustomValue:
 
 
 class CustomValueIniData(IniData):
-    def parse_ini_value(self, parser: ConfigParser, section: str, _field, hint) -> Any:
+    def parse_ini_value(self, parser: ConfigParser, section: str, field, hint) -> Any:
         if hint is CustomValue:
-            return CustomValue(parser.get(section, _field.name))
+            return CustomValue(parser.get(section, field.name))
 
-        return super().parse_ini_value(parser, section, _field, hint)
+        return super().parse_ini_value(parser, section, field, hint)
 
     def parse_environment_value(self, val: str, hint) -> Any:
         if hint is CustomValue:
@@ -97,11 +98,11 @@ class CustomValueIniData(IniData):
 
 
 class CustomValueTomlData(TomlData):
-    def parse_toml_value(self, val: Any, _field, hint) -> Any:
+    def parse_toml_value(self, val: Any, field, hint) -> Any:
         if hint is CustomValue:
             return CustomValue(val)
 
-        return super().parse_toml_value(val, _field, hint)
+        return super().parse_toml_value(val, field, hint)
 
     def parse_environment_value(self, val: str, hint) -> Any:
         if hint is CustomValue:
@@ -110,6 +111,7 @@ class CustomValueTomlData(TomlData):
         return super().parse_environment_value(val, hint)
 
 
+# TODO: refactor TestIniData and TestTomlData into one set using parametrize, to remove duplication
 @m.describe("IniData")
 class TestIniData:
     @m.context("When the INI file is missing")
@@ -591,6 +593,176 @@ class TestTomlData:
             )
 
 
+@m.describe("Configuration loaded from multiple sections")
+@pytest.mark.parametrize(
+    "loader, config_text",
+    [
+        (
+            IniData,
+            "[common]\nsecret=SECRET_VALUE\nkey1=common\n"
+            "[application]\nkey1=application\n"
+            "[other]\nkey2=extra\n"
+            "[empty]\n"
+            "[numeric]\nkey1=1\nkey2=2.5\nkey3=true\n"
+            "[blank]\nkey1=\nkey2=\nkey3=\n"
+            "[invalid]\nkey1=invalid\n",
+        ),
+        (
+            TomlData,
+            '[common]\nsecret="SECRET_VALUE"\nkey1="common"\n'
+            '[application]\nkey1="application"\n'
+            '[other]\nkey2="extra"\n'
+            "[empty]\n"
+            "[numeric]\nkey1=1\nkey2=2.5\nkey3=true\n"
+            '[blank]\nkey1=""\nkey2=""\nkey3=""\n'
+            '[invalid]\nkey1="invalid"\n',
+        ),
+    ],
+    ids=["ini", "toml"],
+)
+class TestMultipleSections:
+    @m.context("When selecting one or more sections")
+    @m.it(
+        "Combines fields with later sections taking precedence and preserves defaults"
+    )
+    @pytest.mark.parametrize(
+        "sections, key1, key2",
+        [
+            (("common",), "common", None),
+            (("common", "application"), "application", None),
+            (("application", "common"), "common", None),
+            (("common", "application", "other"), "application", "extra"),
+            (("common", "application", "common"), "common", None),
+            (("absent", "common", "empty", "missing"), "common", None),
+        ],
+    )
+    def test_section_resolution(
+        self, tmp_path, loader, config_text, sections, key1, key2
+    ):
+        config_file = tmp_path / "config"
+        config_file.write_text(config_text)
+
+        assert loader(ConfigWithSecret).from_file(
+            config_file, *sections
+        ) == ConfigWithSecret(secret="SECRET_VALUE", key1=key1, key2=key2)
+
+    @m.context("When the section is supplied by keyword")
+    @m.it("Preserves the existing single-section interface")
+    def test_keyword_section(self, tmp_path, loader, config_text):
+        config_file = tmp_path / "config"
+        config_file.write_text(config_text)
+
+        assert loader(ConfigWithSecret).from_file(
+            config_file=config_file, section="common"
+        ) == ConfigWithSecret(secret="SECRET_VALUE", key1="common")
+
+    @m.context("When required fields are absent from all selected sections")
+    @m.it("Preserves the dataclass construction error")
+    def test_missing_required_fields(self, tmp_path, loader, config_text):
+        config_file = tmp_path / "config"
+        config_file.write_text(config_text)
+
+        with pytest.raises(TypeError, match="secret"):
+            loader(ConfigWithSecret).from_file(config_file, "application", "absent")
+
+    @m.context("When fields are distributed across sections and the environment")
+    @m.it("Uses file values before falling back to prefixed environment variables")
+    def test_environment_fallback(self, tmp_path, loader, config_text):
+        config_file = tmp_path / "config"
+        config_file.write_text(config_text)
+
+        with patch.dict(
+            "os.environ",
+            {
+                "EXAMPLE_SECRET": "environment_secret",
+                "EXAMPLE_KEY1": "environment_key1",
+                "EXAMPLE_KEY2": "environment_key2",
+            },
+        ):
+            parser = loader(ConfigWithSecret, use_env=True, env_prefix="EXAMPLE_")
+            assert parser.from_file(
+                config_file, "common", "application", "missing"
+            ) == ConfigWithSecret(
+                secret="SECRET_VALUE", key1="application", key2="environment_key2"
+            )
+
+    @m.context("When all selected sections are missing")
+    @m.it("Uses environment variables for all fields")
+    def test_missing_sections_environment(self, tmp_path, loader, config_text):
+        config_file = tmp_path / "config"
+        config_file.write_text(config_text)
+
+        with patch.dict("os.environ", {"KEY1": "1", "KEY2": "2.5", "KEY3": "true"}):
+            parser = loader(ConfigWithBuiltinTypes, use_env=True)
+            assert parser.from_file(
+                config_file, "absent", "missing"
+            ) == ConfigWithBuiltinTypes(1, 2.5, True)
+
+    @m.context("When a winning value is empty")
+    @m.it("Applies environment fallback without restoring an earlier value")
+    @pytest.mark.parametrize("use_env", [False, True])
+    def test_empty_winning_values(self, tmp_path, loader, config_text, use_env):
+        config_file = tmp_path / "config"
+        config_file.write_text(config_text)
+        expected = (
+            ConfigWithOptionalBuiltinTypes(9, 9.5, False)
+            if use_env
+            else ConfigWithOptionalBuiltinTypes(None, None, None)
+        )
+
+        with patch.dict("os.environ", {"KEY1": "9", "KEY2": "9.5", "KEY3": "false"}):
+            parser = loader(ConfigWithOptionalBuiltinTypes, use_env=use_env)
+            with capture_logs() as logs:
+                assert parser.from_file(config_file, "numeric", "blank") == expected
+
+        assert logs[0]["sections"] == ("numeric", "blank")
+
+        if use_env:
+            fallback_logs = [entry for entry in logs if "env_var" in entry]
+            assert len(fallback_logs) == 3
+            assert all(entry["section"] == "blank" for entry in fallback_logs)
+
+    @m.context("When an invalid typed value is overridden")
+    @m.it("Parses only the winning value")
+    def test_parse_only_winning_values(self, tmp_path, loader, config_text):
+        config_file = tmp_path / "config"
+        config_file.write_text(config_text)
+
+        assert loader(ConfigWithBuiltinTypes).from_file(
+            config_file, "invalid", "numeric"
+        ) == ConfigWithBuiltinTypes(1, 2.5, True)
+
+    @m.context("When custom values are loaded from multiple sections")
+    @m.it("Preserves custom parsing hooks and the winning source section")
+    def test_custom_parsing(self, tmp_path, loader, config_text):
+        config_file = tmp_path / "config"
+        config_file.write_text(config_text)
+        custom_loader = CustomValueIniData if loader is IniData else CustomValueTomlData
+
+        assert custom_loader(ConfigWithCustomValue).from_file(
+            config_file, "common", "application", "other"
+        ) == ConfigWithCustomValue(CustomValue("application"), "extra")
+
+
+@m.context("When INI sections inherit interpolated DEFAULT values")
+@m.it("Resolves precedence and interpolation in the winning section")
+def test_multiple_ini_sections_with_defaults(tmp_path):
+    config_file = tmp_path / "config.ini"
+    config_file.write_text(
+        "[DEFAULT]\nkey1=%(root)s/default\n"
+        "[common]\nroot=/common\nkey1=/explicit\n"
+        "[application]\nroot=/application\n"
+    )
+    parser = IniData(ConfigWithPathType)
+
+    assert parser.from_file(config_file, "common", "application") == ConfigWithPathType(
+        Path("/application/default")
+    )
+    assert parser.from_file(config_file, "application", "common") == ConfigWithPathType(
+        Path("/explicit")
+    )
+
+
 @config_class
 class ConfigWithFieldVariations:
     auto_hidden: str  # A field we want to be automatically hidden i.e. a secret
@@ -603,12 +775,12 @@ class ConfigWithFieldVariations:
     attribute = "attribute"  # An attribute that's not a dataclass field
 
 
-class ConfigWithNotWrappedConfigClassSubclass(ConfigWithFieldVariations):
+class ConfigWithNotWrappedSubclass(ConfigWithFieldVariations):
     subclass_field: str  # To demonstrate won't work
 
 
 @config_class
-class ConfigWithWrappedConfigClassSubclass(ConfigWithFieldVariations):
+class ConfigWithWrappedSubclass(ConfigWithFieldVariations):
     subclass_field_hidden: str = "subclass_field_hidden"
     subclass_field_visible: str = field(default="subclass_field_visible", repr=True)
 
@@ -652,16 +824,16 @@ class TestConfig:
         assert "explicit_hidden" not in str(config)
         assert "explicit_hidden" not in repr(config)
 
-    @m.context("When field used without specifying repr")
+    @m.context("When a field used without specifying the repr")
     @m.it("Includes the field in string representation")
     def test_non_repr(self):
-        # Test documents accepted limitation
-        # When someone uses field without specifying get the repr=True default
-        # There isn't a way within decorator to distinguish between someone having
-        # explicitly specified repr=True or used the default
-        # There are alternatives like providing a config_field with different defaults
-        # and forcing use within config_class but decided against
-
+        # This test documents an accepted limitation.
+        #
+        # When someone uses a field without specifying repr=True (True is the default),
+        # there isn't a way within the decorator to distinguish between an explicit
+        # repr=True and that default. There are alternatives like providing a custom
+        # config_field with a repr=False default and forcing use within config_class,
+        # but that was decided against.
         config = ConfigWithFieldVariations(
             "auto_hidden", "explicit_visible", "explicit_hidden"
         )
@@ -681,7 +853,7 @@ class TestConfig:
         assert config.class_default == "class_default"
 
         # Whilst we create an intermediary field, we still end up with same end point
-        # of class attribute containing default value
+        # of a class attribute containing the default value
         # https://docs.python.org/3/library/dataclasses.html#dataclasses.field
         assert ConfigWithFieldVariations.class_default == "class_default"
 
@@ -741,7 +913,7 @@ class TestConfig:
     @m.context("When subclass a wrapped class without wrapping subclass")
     @m.it("Fields hidden by @config_class are still hidden")
     def test_subclass_preserves_hidden_fields(self):
-        config = ConfigWithNotWrappedConfigClassSubclass(
+        config = ConfigWithNotWrappedSubclass(
             "auto_hidden", "explicit_visible", "explicit_hidden"
         )
 
@@ -761,8 +933,7 @@ class TestConfig:
         # Test to make explicit need to wrap subclasses too to use dataclass features
 
         assert (
-            ConfigWithNotWrappedConfigClassSubclass.__init__
-            == ConfigWithFieldVariations.__init__
+            ConfigWithNotWrappedSubclass.__init__ == ConfigWithFieldVariations.__init__
         ), "Dunder methods created by dataclass directly inherited"
 
         with pytest.raises(
@@ -771,14 +942,14 @@ class TestConfig:
                 "ConfigWithFieldVariations.__init__() got an unexpected keyword argument 'subclass_field'"
             ),
         ):
-            ConfigWithNotWrappedConfigClassSubclass(
+            ConfigWithNotWrappedSubclass(
                 "auto_hidden",
                 "explicit_visible",
                 "explicit_hidden",
                 subclass_field="subclass_field",
             )
 
-        config = ConfigWithNotWrappedConfigClassSubclass(
+        config = ConfigWithNotWrappedSubclass(
             "auto_hidden", "explicit_visible", "explicit_hidden"
         )
 
@@ -789,7 +960,7 @@ class TestConfig:
     def test_wrapped_subclass(self):
         # https://docs.python.org/3/library/dataclasses.html#inheritance
 
-        config = ConfigWithWrappedConfigClassSubclass(
+        config = ConfigWithWrappedSubclass(
             "auto_hidden",
             "explicit_visible",
             "explicit_hidden",
@@ -831,7 +1002,11 @@ class TestIniDataConfigClass:
         ini_file = tmp_path / "config.ini"
         section = "section"
         ini_file.write_text(
-            f"[{section}]\nauto_hidden=auto_hidden\nexplicit_visible=explicit_visible\nexplicit_hidden=explicit_hidden\nattribute=should_ignore\n"
+            f"[{section}]\n"
+            "auto_hidden=auto_hidden\n"
+            "explicit_visible=explicit_visible\n"
+            "explicit_hidden=explicit_hidden\n"
+            "attribute=should_ignore\n"
         )
 
         with caplog.at_level(logging.DEBUG):
@@ -858,7 +1033,11 @@ class TestTomlDataConfigClass:
         toml_file = tmp_path / "config.ini"
         section = "section"
         toml_file.write_text(
-            f'[{section}]\nauto_hidden = "auto_hidden"\nexplicit_visible = "explicit_visible"\nexplicit_hidden = "explicit_hidden"\nattribute = "should_ignore"\n'
+            f"[{section}]\n"
+            f'auto_hidden = "auto_hidden"\n'
+            f'explicit_visible = "explicit_visible"\n'
+            f'explicit_hidden = "explicit_hidden"\n'
+            f'attribute = "should_ignore"\n'
         )
 
         with caplog.at_level(logging.DEBUG):

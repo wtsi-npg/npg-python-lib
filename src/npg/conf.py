@@ -23,7 +23,7 @@ from configparser import ConfigParser
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
-from typing import Any, Optional, TypeVar, get_type_hints, dataclass_transform
+from typing import Any, Optional, TypeVar, dataclass_transform, get_type_hints
 
 from structlog import get_logger
 
@@ -73,16 +73,17 @@ class BaseConfigData(ABC):
         self.env_prefix = env_prefix
 
     @abstractmethod
-    def from_file(self, config_file: PathLike | str, section: str) -> D:
-        """Create a new dataclass instance from a configuration file
+    def from_file(self, config_file: PathLike | str, section: str, *sections: str) -> D:
+        """Create a new dataclass instance from configuration file sections.
 
         Args:
             config_file: Path to the configuration file.
-            section: Section name within the configuration file.
+            section: The first section name within the configuration file.
+            *sections: Additional section names. Later sections override earlier ones.
 
         Returns:
             A new dataclass instance populated with configuration values.
-        ."""
+        """
 
         ...
 
@@ -135,7 +136,14 @@ class BaseConfigData(ABC):
         raise ValueError(f"Unsupported type '{hint}'")
 
     def _env_fallback(
-        self, field, hint, *, path: str, section: str, source: str, missing_field: bool
+        self,
+        field,
+        hint,
+        *,
+        path: str,
+        section: str | tuple[str, ...],
+        source: str,
+        missing_field: bool,
     ) -> Any:
         env_var = self.env_var_name(field)
 
@@ -226,23 +234,31 @@ class IniData(BaseConfigData):
     INI file and environment variables, respectively.
     """
 
-    def from_file(self, ini_file: PathLike | str, section: str) -> D:
-        """Create a new dataclass instance from an INI file section.
+    def from_file(self, config_file: PathLike | str, section: str, *sections: str) -> D:
+        """Create a new dataclass instance from INI file sections.
+
+        For each field, use the last selected section containing it, including
+        inherited DEFAULT values. Parse only that value, then apply the existing
+        environment fallback if enabled. An empty winning value does not restore
+        a value from an earlier section.
 
         Args:
-            ini_file: The INI file path.
-            section: The section name containing the configuration.
+            config_file: The INI file path.
+            section: The first section name containing the configuration.
+            *sections: Additional section names. Later sections override earlier ones.
 
         Returns:
             A new dataclass instance with values populated from the INI file.
         """
 
-        path = Path(ini_file).resolve().absolute()
+        section_names = (section, *sections)
+        path = Path(config_file).resolve().absolute()
 
         log.info(
             "Reading configuration from file",
             path=path.as_posix(),
             section=section,
+            sections=section_names,
             dataclass=self.dataclass,
         )
 
@@ -258,15 +274,21 @@ class IniData(BaseConfigData):
         for field in dataclasses.fields(self.dataclass):
             hint = hints.get(field.name, None)
 
-            if parser.has_option(section, field.name):
-                val = self.parse_ini_value(parser, section, field, hint)
+            source_section = None
+            for name in reversed(section_names):
+                if parser.has_option(name, field.name):
+                    source_section = name
+                    break
+
+            if source_section is not None:
+                val = self.parse_ini_value(parser, source_section, field, hint)
 
                 if val is None and self.use_env:
                     val = self._env_fallback(
                         field,
                         hint,
                         path=path.as_posix(),
-                        section=section,
+                        section=source_section,
                         source="INI",
                         missing_field=True,
                     )
@@ -278,7 +300,7 @@ class IniData(BaseConfigData):
                     field,
                     hint,
                     path=path.as_posix(),
-                    section=section,
+                    section=section_names if sections else section,
                     source="INI",
                     missing_field=False,
                 )
@@ -330,23 +352,31 @@ class TomlData(BaseConfigData):
     of a specified dataclass. It supports the same features as IniData.
     """
 
-    def from_file(self, toml_file: PathLike | str, section: str) -> D:
-        """Create a new dataclass instance from a TOML file section.
+    def from_file(self, config_file: PathLike | str, section: str, *sections: str) -> D:
+        """Create a new dataclass instance from TOML file sections.
+
+        For each field, use the last selected section containing it. Parse only
+        that value, then apply the existing environment fallback if enabled. An
+        empty winning value does not restore a value from an earlier section.
+        Section names refer to top-level tables.
 
         Args:
-            toml_file: The TOML file path.
-            section: The section name containing the configuration.
+            config_file: The TOML file path.
+            section: The first section name containing the configuration.
+            *sections: Additional section names. Later sections override earlier ones.
 
         Returns:
             A new dataclass instance with values populated from the TOML file.
         """
 
-        path = Path(toml_file).resolve().absolute()
+        section_names = (section, *sections)
+        path = Path(config_file).resolve().absolute()
 
         log.info(
             "Reading configuration from file",
             path=path.as_posix(),
             section=section,
+            sections=section_names,
             dataclass=self.dataclass,
         )
 
@@ -356,24 +386,33 @@ class TomlData(BaseConfigData):
         except tomllib.TOMLDecodeError as e:
             raise ParseError(f"Could not read '{path}'") from e
 
-        section_data = data.get(section, {})
-        if section_data is None:
-            section_data = {}
+        section_data = {}
+        for name in section_names:
+            values = data.get(name, {})
+            section_data[name] = {} if values is None else values
 
         hints = get_type_hints(self.dataclass)
         kwargs = {}
         for field in dataclasses.fields(self.dataclass):
             hint = hints.get(field.name, None)
 
-            if field.name in section_data:
-                val = self.parse_toml_value(section_data.get(field.name), field, hint)
+            source_section = None
+            for name in reversed(section_names):
+                if field.name in section_data[name]:
+                    source_section = name
+                    break
+
+            if source_section is not None:
+                val = self.parse_toml_value(
+                    section_data[source_section].get(field.name), field, hint
+                )
 
                 if val is None and self.use_env:
                     val = self._env_fallback(
                         field,
                         hint,
                         path=path.as_posix(),
-                        section=section,
+                        section=source_section,
                         source="TOML",
                         missing_field=True,
                     )
@@ -385,7 +424,7 @@ class TomlData(BaseConfigData):
                     field,
                     hint,
                     path=path.as_posix(),
-                    section=section,
+                    section=section_names if sections else section,
                     source="TOML",
                     missing_field=False,
                 )
